@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# 校验 Conventional Commits 格式；merge/revert 提交放行。
+set -uo pipefail
+msg_file="$1"
+first=$(head -1 "$msg_file" | sed 's/[[:space:]]*$//')
+
+# merge / revert / fixup 放行
+case "$first" in
+  Merge*|Revert*|fixup!*|squash!*) exit 0 ;;
+esac
+
+if ! printf '%s' "$first" | grep -qE '^(feat|fix|chore|docs|refactor|test|perf)(\([a-z0-9-]+\))?: .{4,}'; then
+  cat >&2 <<'EOF'
+✘ 提交信息不符合 Conventional Commits。
+
+格式：<type>(<scope>): <subject>
+  type  = feat | fix | chore | docs | refactor | test | perf
+  scope = db | auth | ui | api | ci | deploy（可选，小写）
+
+例：feat(ui): 今日页 7 天迷你指标
+    fix(api): 同日记录合并覆盖了 source 字段
+EOF
+  exit 1
+fi
+exit 0

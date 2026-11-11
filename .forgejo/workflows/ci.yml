@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: docker
+    container:
+      image: node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装依赖
+        run: npm ci --registry=https://registry.npmmirror.com
+      - name: 类型检查
+        run: npx tsc --noEmit
+      - name: 数据库冒烟 + 构建
+        run: bash scripts/ci.sh
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"

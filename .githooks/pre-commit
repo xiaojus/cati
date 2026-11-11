@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# 提交前检查：① 禁止在 main 上直接提交业务改动 ② 禁止提交敏感/数据文件 ③ 快速类型检查
+set -uo pipefail
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+is_merge=0
+[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] && is_merge=1
+
+if [ "$branch" = "main" ] && [ "$is_merge" = "0" ]; then
+  cat >&2 <<'EOF'
+✘ 禁止在 main 上直接提交。
+
+按 CONTRIBUTING.md 的流程：
+  git switch -c feat/<slug>
+  ... 提交 ...
+  git switch main && git merge --no-ff feat/<slug>
+EOF
+  exit 1
+fi
+
+staged=$(git diff --cached --name-only)
+blocked=$(printf '%s\n' "$staged" | grep -E '(^|/)(\.env$|\.env\.local$|data/|uploads/|node_modules/)' || true)
+if [ -n "$blocked" ]; then
+  echo "✘ 检测到不该提交的文件：" >&2
+  echo "$blocked" >&2
+  echo "  机密与环境变量放 .env（已在 .gitignore），数据放 data/（同样忽略）" >&2
+  exit 1
+fi
+
+# 只对暂存的 TS/TSX 做增量类型检查（快）
+ts_files=$(printf '%s\n' "$staged" | grep -E '\.(ts|tsx)$' || true)
+if [ -n "$ts_files" ]; then
+  if ! npx tsc --noEmit >/tmp/cati-tsc.log 2>&1; then
+    echo "✘ 类型检查未通过：npx tsc --noEmit" >&2
+    tail -20 /tmp/cati-tsc.log >&2
+    exit 1
+  fi
+fi
+
+exit 0
