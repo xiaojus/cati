@@ -8,7 +8,9 @@ say(){ printf "${BLUE}▶ %s${NC}\n" "$1"; }
 ok(){ printf "${GREEN}✔ %s${NC}\n" "$1"; }
 die(){ printf "${RED}✘ %s${NC}\n" "$1"; exit 1; }
 
-say "1/3 类型检查 (tsc --noEmit)"
+say "1/3 生成类型 + 类型检查 (next typegen && tsc --noEmit)"
+# Next 16 的全局类型（LayoutProps/PageProps 等）由 next typegen 生成，干净的 CI 环境必须先跑，否则 tsc 报 Cannot find name
+npx next typegen >/dev/null 2>&1 || true
 npx tsc --noEmit || die "类型检查失败"
 ok "类型检查通过"
 

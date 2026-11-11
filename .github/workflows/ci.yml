@@ -25,29 +25,23 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
-      - name: 类型检查
-        run: npx tsc --noEmit
-
-      - name: 数据库冒烟
-        run: |
-          export CAT_DB=./data/ci-smoke.db
-          mkdir -p data
-          npm run db:reset
-          node scripts/ci-assert.cjs
-
-      - name: 构建
-        run: npm run build
+      - name: CI（类型 + 数据库冒烟 + 构建）
+        run: npm run ci
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
-      - name: 冒烟测试 /api/health
+      - name: 冒烟 /api/health
         run: |
           set -e
+          # standalone 的 cwd 是 .next/standalone，相对路径会指错库，这里用绝对路径
+          export CAT_DB="$GITHUB_WORKSPACE/data/cat.db"
+          mkdir -p "$GITHUB_WORKSPACE/data"
+          npm run db:reset
           node .next/standalone/server.js & echo $! > /tmp/srv.pid
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json 2>/dev/null; then break; fi
+            curl -fsS http://127.0.0.1:3000/api/health -o /tmp/health.json && break
             sleep 1
           done
           cat /tmp/health.json
-          node -e 'const h=require("/tmp/health.json"); if(!h.ok) process.exit(1);'
-          kill "$(cat /tmp/srv.pid)"
+          node -e 'const h=require("/tmp/health.json"); if(!h.ok) process.exit(1); if(h.counts.daily_logs<1) process.exit(1);'
+          kill "$(cat /tmp/srv.pid)" || true

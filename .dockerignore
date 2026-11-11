@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+data
+uploads
+*.log
+.env
+.env.local
+spec
+README.md

@@ -1,0 +1,22 @@
+services:
+  cati:
+    build: .
+    image: cati:local
+    container_name: cati
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - CAT_DB=/app/data/cat.db
+      - TZ=Asia/Shanghai
+      - NODE_ENV=production
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    ports:
+      - "127.0.0.1:3100:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

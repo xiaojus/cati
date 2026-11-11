@@ -1,90 +1,109 @@
-# 开发流程（标准 Git Flow，单人 + CI 强制）
+# 整体开发流程
 
-> 目标：main 永远可部署；所有功能走分支 + PR + CI 门禁；不靠自觉，靠 hook 和 CI 拦。
+> 仓库：`github.com/xiaojus/cati`（私有）　生产：`https://cati.cocodemo.cloud`
+> 原则：**main 永远可部署；所有改动走分支 + PR + CI 门禁；不靠自觉，靠机器拦。**
 
-## 1. 分支模型
+## 0. 角色分工
 
-| 分支 | 用途 | 谁能直接推 |
+| 角色 | 职责 | 产出 |
 |---|---|---|
-| `main` | 生产分支，**永远可部署** | ❌ 禁止直接提交/推送（hook 拦截） |
-| `feat/<ticket>-<slug>` | 新功能，如 `feat/t2-auth` | ✅ |
-| `fix/<slug>` | 缺陷修复，如 `fix/weight-chart-oob` | ✅ |
-| `chore/<slug>` | 依赖升级、脚本、CI 等 | ✅ |
-| `docs/<slug>` | 纯文档 | ✅ |
+| **你（产品）** | 定需求、定优先级、验收体验 | 需求描述、问题清单 |
+| **小橘（统筹）** | 拆任务卡、写验收标准、跑 CI、review diff、合并、部署、汇报 | 任务卡、PR、上线版本 |
+| **Claude Code** | 按任务卡写代码、自己跑测试 | 分支上的 commit |
+| **GitHub Actions** | 客观门禁：类型 / 数据库 / 构建 / health 冒烟 | 绿或红 |
 
-分支从 `main` 切出，生命周期 ≤ 3 天；超过就拆小。
+**铁律：Claude Code 说"做完了"不算完成。** 完成 = 我独立跑通 CI + 看过 diff + 边界没越。
 
-## 2. 提交信息（Conventional Commits）
-
-```
-<type>(<scope>): <subject>
-
-type = feat | fix | chore | docs | refactor | test | perf
-scope = db | auth | ui | api | ci | deploy（可选）
-```
-
-例：`feat(ui): 今日页 7 天迷你指标`、`fix(api): 同日记录合并时覆盖了 source 字段`
-
-`commit-msg` hook 会校验格式，不合格直接拒绝。
-
-## 3. 一次改动的完整流程
+## 1. 一次性准备（新机器 / 新会话）
 
 ```bash
-git switch main && git pull --ff-only           # 1. 同步（有远程后）
-git switch -c feat/t3-today-page                # 2. 切分支
+gh repo clone xiaojus/cati && cd cati
+git config core.hooksPath .githooks && chmod +x .githooks/*
+cp .env.example .env        # 填 CAT_SESSION_SECRET、DEEPSEEK_API_KEY
+npm ci
+npm run db:reset
+```
+
+## 2. 需求 → 任务卡
+
+每条任务卡必须四件套，缺一项不许开工：
+
+```
+【目标】一句话说清要什么效果
+【边界】只许改哪些文件；明确不许动什么
+【验收】可执行命令或可观察现象（不是"看起来对"）
+【禁止】不许加依赖 / 不许改 CI / 不许动 spec/
+```
+
+示例：
+
+> **目标**：今日页显示最近 7 天便便评分迷你趋势，连续 2 天 ≥5 分标黄
+> **边界**：只改 `app/(tabs)/today/page.tsx`、`components/MiniTrend.tsx`
+> **验收**：`npm run ci` 绿；造 3 天数据后第 3 天出现黄色提示条
+> **禁止**：不新增依赖；不改 `lib/db.ts`；不碰 `spec/`
+
+## 3. 分支与提交
+
+```bash
+git switch main && git pull --ff-only
+git switch -c feat/t3-today-page        # feat | fix | chore | docs + 任务号
 # ...开发...
-npm run ci                                      # 3. 本地跑 CI（pre-push 也会自动跑）
-git add -A && git commit -m "feat(ui): 今日页骨架"  # 4. 提交
-git switch main
-git merge --no-ff feat/t3-today-page            # 5. 合并（保留分支信息）
-git branch -d feat/t3-today-page
-git tag -a v0.x.0 -m "..."                      # 6. 可部署版本打 tag
+npm run ci                               # 必须全绿
+git add -A && git commit -m "feat(ui): 今日页 7 天迷你指标"
+git push -u origin feat/t3-today-page
 ```
 
-有远程后（Forgejo/GitHub）第 5 步改为 **开 PR**：CI 绿 + 自查清单勾完才可合并，合并方式 `--no-ff`（不要 squash，保留任务粒度）。
+提交信息由 `commit-msg` hook 强制：`<type>(<scope>): <subject>`，type ∈ feat / fix / chore / docs / refactor / test / perf。
 
-## 4. CI 门禁（`scripts/ci.sh`）
+## 4. 三道 CI 门
 
-顺序执行，任何一步失败即阻断：
+| 门 | 时机 | 跑什么 | 拦什么 |
+|---|---|---|---|
+| **pre-commit** | 本地提交 | main 保护 + 敏感文件检查 + tsc | 直接在 main 提交、误提 `.env`/`data/`、类型错误 |
+| **pre-push** | 本地推送 | `npm run ci` 全量 | 推半成品 |
+| **GitHub Actions** | push / PR | 装依赖 → 类型 → 数据库冒烟 → 构建 → `/api/health` 冒烟 | 绕过本地 hook 的情况 |
 
-| 步骤 | 命令 | 失败含义 |
-|---|---|---|
-| 类型检查 | `npx tsc --noEmit` | 类型错误 |
-| 数据库冒烟 | 临时库 `db:reset` + 计数断言 | schema/迁移/种子坏了 |
-| 构建 | `npm run build` | 服务端/客户端边界、RSC 错误 |
+`npm run ci` = 类型检查 → 临时库建表+种子+断言（表齐全、唯一约束、猫名） → `next build`。
 
-远程 CI：`.forgejo/workflows/ci.yml`（未来推到 Forgejo 时生效）、`.github/workflows/ci.yml`（备用）。
-
-## 5. main 保护（本地 hook 版）
-
-`.githooks/pre-commit` 会拒绝**在 main 上直接提交业务改动**（merge commit 除外）。
-`.githooks/pre-push` 在推送前跑完整 CI。
-将来接 Forgejo 时，在仓库设置里开启：禁止直接 push main、必须 PR、CI 通过才可合并、至少 1 个 review。
-
-启用方式（新 clone 后必须执行一次）：
+## 5. PR 流程
 
 ```bash
-git config core.hooksPath .githooks
-chmod +x .githooks/*
+gh pr create --fill --base main \
+  --title "feat(ui): 今日页 7 天迷你指标" \
+  --body "## 改了什么…\n## 怎么验…\n## 风险/回滚…"
+gh pr checks --watch                     # 等 CI 绿
+gh pr merge --merge --delete-branch      # 合并（不 squash，保留任务粒度）
 ```
 
-## 6. 合并前自查清单
+**main 保护（GitHub 侧）**：禁止直接 push、CI 必须通过、禁止强推、合并后自动删 head 分支。
 
-- [ ] `npm run ci` 全绿
-- [ ] 改动只在本任务范围内（没有顺手重构别的模块）
-- [ ] 没有提交 `.env`、`data/`、`uploads/`、`node_modules`
-- [ ] 新增/变更的接口有对应类型定义
-- [ ] 移动端 375px 宽无横向滚动（UI 任务）
-- [ ] 健康数据相关改动：AI 仍不直接写库，数值仍做范围校验
+## 6. 部署
 
-## 7. 版本与发布
+```bash
+# 本地
+git switch main && git pull --ff-only
+npm run ci && git tag -a v0.x.0 -m "…" && git push --tags
+# 服务器
+cd ~/apps/cati && git fetch --tags && git checkout v0.x.0
+docker compose up -d --build
+curl -fsS http://127.0.0.1:3100/api/health      # 容器就绪
+curl -fsS https://cati.cocodemo.cloud/api/health # 穿透就绪
+```
 
-- `v0.x.0`：每完成一组任务（T1–T3、T4–T6…）
-- 部署前必须 `git tag` + `npm run ci` 绿 + `main` 干净
-- 部署动作：构建镜像 → 起容器 → 刷新 OpenResty → 冒烟 `/api/health`
+**回滚**：`git checkout <上一个 tag> && docker compose up -d --build`。迁移只前进，回滚前先备份 `data/cat.db`。
 
-## 8. Claude Code 的接入纪律
+## 7. 日常节奏
 
-- 每个任务卡一个分支，一次只做一件事
-- Claude Code 不许直接提交到 main、不许改 CI 配置、不许动 `spec/` 之外的流程文件
-- 提交前由**委托方（我）**跑 `npm run ci` 并 review diff，再合并
+| 频率 | 动作 |
+|---|---|
+| 每个功能 | 一个分支、一个 PR、一次验收汇报 |
+| 每天 | 我汇报：做完什么、卡在哪、下一步 |
+| 每组合任务 | 打 tag（v0.1 / v0.2 …），部署一次 |
+
+## 8. 不允许的操作
+
+- ❌ 直接在 main 提交或 push
+- ❌ 跳过 CI 合并（`--admin`）
+- ❌ 提交 `.env`、`data/`、`uploads/`
+- ❌ Claude Code 修改 CI 配置或 `spec/` 之外的流程文件
+- ❌ 在健康数据链路上让 AI 直接写库
