@@ -233,7 +233,7 @@ export default function LoginPage() {
                 required
                 autoComplete="email"
                 inputMode="email"
-                placeholder="me@local"
+                placeholder="你的邮箱"
                 className="h-12 w-full rounded-2xl border border-ink/10 bg-cream/60 px-4 text-[15px] text-ink outline-none transition placeholder:text-muted/60 focus:border-gold focus:ring-2 focus:ring-gold/30 dark:border-white/15 dark:bg-white/[0.04] dark:text-cream dark:placeholder:text-cream/30"
               />
             </label>

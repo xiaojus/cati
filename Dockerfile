@@ -2,6 +2,9 @@
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
+# better-sqlite3 没有匹配的预编译包时需要现场编译
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm ci --include=dev
 
 FROM node:22-bookworm-slim AS build
@@ -23,6 +26,8 @@ COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/scripts/migrate.cjs ./scripts/migrate.cjs
+# migrate.cjs 依赖 drizzle-orm/better-sqlite3，Next standalone 追踪不到，整包带上
+COPY --from=build /app/node_modules ./node_modules
 
 EXPOSE 3000
 CMD ["sh", "-c", "node scripts/migrate.cjs && node server.js"]
