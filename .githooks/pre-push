@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# 推送前跑完整 CI。失败则拒绝推送。
+set -uo pipefail
+echo "▶ pre-push: 运行 npm run ci"
+if ! npm run ci; then
+  echo "✘ CI 未通过，已阻止推送。修复后再推。" >&2
+  exit 1
+fi
