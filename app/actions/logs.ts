@@ -1,15 +1,17 @@
 'use server';
 
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getSessionUser } from '@/lib/auth';
 import { isValidDateString, todayInShanghai } from '@/lib/dates';
 import { db } from '@/lib/db';
-import { catMembers, dailyLogs } from '@/lib/schema';
+import { aiParses, catMembers, dailyLogs } from '@/lib/schema';
 
 type SaveLogResult = { ok: true } | { ok: false; error: string };
+
+const aiParseIdSchema = z.uuid();
 
 function normalizeNumber(value: unknown): unknown {
   if (value === undefined || value === null) {
@@ -109,8 +111,12 @@ function toRawInput(input: FormData | Record<string, unknown>) {
  */
 export async function saveLog(
   input: FormData | Record<string, unknown>,
+  aiParseId?: string | null,
 ): Promise<SaveLogResult> {
   const parsed = saveLogSchema.safeParse(toRawInput(input));
+  const parsedAiParseId = aiParseId
+    ? aiParseIdSchema.safeParse(aiParseId)
+    : null;
 
   if (!parsed.success) {
     return {
@@ -180,6 +186,23 @@ export async function saveLog(
           createdBy: user.id,
         },
       });
+
+    // 用户确认保存后，把对应的 AI 解析标记为已采纳；标记失败不影响日志本身。
+    if (parsedAiParseId?.success) {
+      try {
+        await db
+          .update(aiParses)
+          .set({ accepted: 1 })
+          .where(
+            and(
+              eq(aiParses.id, parsedAiParseId.data),
+              eq(aiParses.userId, user.id),
+            ),
+          );
+      } catch (error) {
+        console.error('[saveLog] 标记 AI 解析已采纳失败', error);
+      }
+    }
   } catch (error) {
     console.error('[saveLog] 保存失败', error);
     return { ok: false, error: '保存失败，请稍后再试' };

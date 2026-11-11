@@ -2,7 +2,14 @@
 
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Check, Plus, X } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import { saveLog } from '@/app/actions/logs';
 
 type PointKey =
@@ -14,10 +21,41 @@ type PointKey =
 
 type PointValues = Record<PointKey, number | null>;
 
+type FieldKey = 'date' | 'stool_count' | 'weight_g' | 'note' | PointKey;
+
+type AiParseResult = {
+  date: string;
+  appetite: number | null;
+  water: number | null;
+  stool_score: number | null;
+  stool_count: number | null;
+  vomit_count: number | null;
+  energy: number | null;
+  weight_g: number | null;
+  note: string | null;
+  warnings: string[];
+  dropped: string[];
+};
+
+type ParseApiResponse = {
+  ok?: boolean;
+  data?: AiParseResult;
+  aiParseId?: string | null;
+  error?: string;
+};
+
 type QuickLogSheetProps = {
   today: string;
   catName: string;
 };
+
+const POINT_KEYS: readonly PointKey[] = [
+  'appetite',
+  'water',
+  'stool_score',
+  'energy',
+  'vomit_count',
+];
 
 const EMPTY_VALUES: PointValues = {
   appetite: null,
@@ -85,23 +123,56 @@ function PawIcon({ className }: { className?: string }) {
   );
 }
 
+function AiDot() {
+  return (
+    <span
+      role="img"
+      aria-label="AI 填充"
+      title="AI 填充"
+      className="ml-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-gold align-middle"
+    />
+  );
+}
+
+function parseErrorMessage(
+  status: number,
+  payload: ParseApiResponse | null,
+): string {
+  if (status === 503) {
+    return 'AI 解析未配置，先手动填吧';
+  }
+  if (status === 504) {
+    return '解析超时，可以手动填';
+  }
+  if (status === 401) {
+    return '登录已过期，请重新登录后再试';
+  }
+  if (status === 429) {
+    return payload?.error ?? '解析太频繁，请稍后再试';
+  }
+  return '没听懂，可以手动填';
+}
+
 function ScoreGroup({
   label,
   hint,
   max,
   value,
+  aiFilled,
   onChange,
 }: {
   label: string;
   hint: string;
   max: number;
   value: number | null;
+  aiFilled: boolean;
   onChange: (value: number | null) => void;
 }) {
   return (
     <fieldset>
       <legend className="text-sm font-semibold text-ink dark:text-cream">
         {label}
+        {aiFilled ? <AiDot /> : null}
       </legend>
       <p className="mt-0.5 text-[11px] text-muted">{hint}</p>
       <div className="mt-2 flex gap-1">
@@ -205,19 +276,30 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
   const [open, setOpen] = useState(false);
   const [logDate, setLogDate] = useState(today);
   const [values, setValues] = useState<PointValues>({ ...EMPTY_VALUES });
+  const [stoolCount, setStoolCount] = useState('');
   const [weight, setWeight] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  const [aiText, setAiText] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [aiParseId, setAiParseId] = useState<string | null>(null);
+  const [aiWarnings, setAiWarnings] = useState<string[]>([]);
+  const [aiDropped, setAiDropped] = useState<string[]>([]);
+  const [aiFilled, setAiFilled] = useState<Set<FieldKey>>(() => new Set());
+
   const fabRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeTimer = useRef<number | null>(null);
   const lockedRef = useRef(false);
   const submittingRef = useRef(false);
+  const aiAbortRef = useRef<AbortController | null>(null);
 
   const titleId = useId();
+  const aiInputId = useId();
   const reduceMotion = useReducedMotion() === true;
 
   useEffect(() => {
@@ -235,9 +317,17 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
   const resetForm = useCallback(() => {
     setLogDate(today);
     setValues({ ...EMPTY_VALUES });
+    setStoolCount('');
     setWeight('');
     setNote('');
     setError(null);
+    setAiText('');
+    setParsing(false);
+    setParseError(null);
+    setAiParseId(null);
+    setAiWarnings([]);
+    setAiDropped([]);
+    setAiFilled(new Set());
   }, [today]);
 
   const closeSheet = useCallback(() => {
@@ -245,6 +335,7 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
       return;
     }
 
+    aiAbortRef.current?.abort();
     setOpen(false);
     setError(null);
     setSuccess(false);
@@ -283,8 +374,114 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
     setOpen(true);
   }
 
+  function clearAiMark(key: FieldKey) {
+    setAiFilled((current) => {
+      if (!current.has(key)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }
+
   function setPoint(key: PointKey, value: number | null) {
     setValues((current) => ({ ...current, [key]: value }));
+    clearAiMark(key);
+  }
+
+  function applyAiResult(data: AiParseResult) {
+    const filled = new Set<FieldKey>();
+
+    if (data.date) {
+      setLogDate(data.date);
+      filled.add('date');
+    }
+
+    const aiPoints: Partial<PointValues> = {};
+    for (const key of POINT_KEYS) {
+      const value = data[key];
+      if (typeof value === 'number') {
+        aiPoints[key] = value;
+        filled.add(key);
+      }
+    }
+    setValues((current) => ({ ...current, ...aiPoints }));
+
+    if (typeof data.stool_count === 'number') {
+      setStoolCount(String(data.stool_count));
+      filled.add('stool_count');
+    }
+
+    if (typeof data.weight_g === 'number') {
+      setWeight(String(data.weight_g));
+      filled.add('weight_g');
+    }
+
+    if (typeof data.note === 'string' && data.note.trim() !== '') {
+      setNote(data.note);
+      filled.add('note');
+    }
+
+    setAiFilled(filled);
+  }
+
+  async function handleParse() {
+    const text = aiText.trim();
+    if (parsing || text === '') {
+      return;
+    }
+
+    aiAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+
+    setParsing(true);
+    setParseError(null);
+    setAiParseId(null);
+    setAiWarnings([]);
+    setAiDropped([]);
+
+    try {
+      const response = await fetch('/api/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal: controller.signal,
+      });
+
+      const payload = (await response
+        .json()
+        .catch(() => null)) as ParseApiResponse | null;
+
+      if (!response.ok || !payload?.ok || !payload.data) {
+        setParseError(parseErrorMessage(response.status, payload));
+        return;
+      }
+
+      const warnings = Array.isArray(payload.data.warnings)
+        ? payload.data.warnings
+        : [];
+      const dropped = Array.isArray(payload.data.dropped)
+        ? payload.data.dropped
+        : [];
+
+      setParseError(null);
+      setAiParseId(payload.aiParseId ?? null);
+      setAiWarnings(warnings);
+      setAiDropped(dropped);
+      applyAiResult(payload.data);
+    } catch {
+      if (!controller.signal.aborted) {
+        setParseError('没听懂，可以手动填');
+      }
+    } finally {
+      if (aiAbortRef.current === controller) {
+        aiAbortRef.current = null;
+        setParsing(false);
+      }
+    }
   }
 
   async function handleSubmit(formData: FormData) {
@@ -297,7 +494,7 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
     setPending(true);
 
     try {
-      const result = await saveLog(formData);
+      const result = await saveLog(formData, aiParseId ?? undefined);
 
       if (!result.ok) {
         setError(result.error);
@@ -415,9 +612,94 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
                   className="flex min-h-0 flex-1 flex-col"
                 >
                   <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-5">
+                    {aiWarnings.length > 0 || aiDropped.length > 0 ? (
+                      <div
+                        role="status"
+                        className="rounded-2xl border border-gold/30 bg-gold/10 px-3.5 py-3 text-xs leading-5 text-gold-deep dark:text-gold"
+                      >
+                        {aiWarnings.length > 0 ? (
+                          <p className="font-semibold">
+                            注意：{aiWarnings.join(' · ')}
+                          </p>
+                        ) : null}
+                        {aiDropped.length > 0 ? (
+                          <p
+                            className={
+                              aiWarnings.length > 0
+                                ? 'mt-1 font-medium'
+                                : 'font-medium'
+                            }
+                          >
+                            {`有 ${aiDropped.length} 个值不在合理范围，已忽略`}
+                          </p>
+                        ) : null}
+                        <p className="mt-1 text-[11px] opacity-80">
+                          AI 只做预填，保存前请核对。
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div className="rounded-2xl border border-ink/10 bg-white/60 p-3.5 dark:border-white/10 dark:bg-white/[0.04]">
+                      <label
+                        htmlFor={aiInputId}
+                        className="block text-sm font-semibold text-ink dark:text-cream"
+                      >
+                        说一句
+                      </label>
+                      <p className="mt-0.5 text-[11px] text-muted">
+                        例如：昨天食欲一般，吐了一次，体重 3.2 公斤
+                      </p>
+                      <textarea
+                        id={aiInputId}
+                        value={aiText}
+                        onChange={(event) => setAiText(event.target.value)}
+                        maxLength={300}
+                        rows={2}
+                        disabled={parsing}
+                        placeholder="用一句话说说今天的情况…"
+                        className="mt-2 w-full resize-none rounded-xl border border-ink/10 bg-white/70 px-3 py-2.5 text-[15px] leading-6 text-ink outline-none transition placeholder:text-muted/60 focus:border-gold focus:ring-2 focus:ring-gold/30 disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:text-cream dark:placeholder:text-cream/30"
+                      />
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <span className="text-[11px] tabular-nums text-muted">
+                          {aiText.length}/300
+                        </span>
+                        <motion.button
+                          type="button"
+                          onClick={handleParse}
+                          disabled={parsing || aiText.trim() === ''}
+                          animate={
+                            parsing && !reduceMotion
+                              ? { opacity: [1, 0.55, 1], scale: [1, 1.02, 1] }
+                              : { opacity: 1, scale: 1 }
+                          }
+                          transition={
+                            parsing && !reduceMotion
+                              ? {
+                                  duration: 1.2,
+                                  repeat: Infinity,
+                                  ease: 'easeInOut',
+                                }
+                              : { duration: 0.15 }
+                          }
+                          className="inline-flex h-11 min-h-[44px] items-center justify-center rounded-xl bg-gold px-5 text-sm font-bold text-ink shadow-[0_2px_10px_rgba(245,183,49,0.3)] transition-colors hover:bg-gold-deep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {parsing ? '解析中…' : '解析'}
+                        </motion.button>
+                      </div>
+                      {parseError ? (
+                        <p
+                          role="alert"
+                          className="mt-2 text-xs font-medium text-coral"
+                        >
+                          {parseError}
+                        </p>
+                      ) : null}
+                    </div>
+
                     <label className="block">
                       <span className="mb-2 block text-sm font-semibold text-ink dark:text-cream">
                         日期
+                        {aiFilled.has('date') ? <AiDot /> : null}
                       </span>
                       <input
                         type="date"
@@ -425,7 +707,10 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
                         value={logDate}
                         max={today}
                         required
-                        onChange={(event) => setLogDate(event.target.value)}
+                        onChange={(event) => {
+                          setLogDate(event.target.value);
+                          clearAiMark('date');
+                        }}
                         className="h-12 w-full rounded-2xl border border-ink/10 bg-white/60 px-4 text-[15px] text-ink outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30 dark:border-white/10 dark:bg-white/[0.04] dark:text-cream"
                       />
                     </label>
@@ -435,19 +720,50 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
                     </p>
 
                     {SCORE_GROUPS.map((group) => (
-                      <ScoreGroup
-                        key={group.key}
-                        label={group.label}
-                        hint={group.hint}
-                        max={group.max}
-                        value={values[group.key]}
-                        onChange={(value) => setPoint(group.key, value)}
-                      />
+                      <Fragment key={group.key}>
+                        <ScoreGroup
+                          label={group.label}
+                          hint={group.hint}
+                          max={group.max}
+                          value={values[group.key]}
+                          aiFilled={aiFilled.has(group.key)}
+                          onChange={(value) => setPoint(group.key, value)}
+                        />
+                        {group.key === 'stool_score' ? (
+                          <label className="block">
+                            <span className="mb-2 flex items-baseline justify-between gap-2 text-sm font-semibold text-ink dark:text-cream">
+                              <span className="inline-flex items-center">
+                                便便次数
+                                {aiFilled.has('stool_count') ? <AiDot /> : null}
+                              </span>
+                              <span className="text-[11px] font-normal text-muted">
+                                可选
+                              </span>
+                            </span>
+                            <input
+                              type="number"
+                              name="stool_count"
+                              value={stoolCount}
+                              onChange={(event) => {
+                                setStoolCount(event.target.value);
+                                clearAiMark('stool_count');
+                              }}
+                              inputMode="numeric"
+                              min={0}
+                              max={10}
+                              step={1}
+                              placeholder="例如 1"
+                              className="h-12 w-full rounded-2xl border border-ink/10 bg-white/60 px-4 text-[15px] text-ink outline-none transition placeholder:text-muted/60 focus:border-gold focus:ring-2 focus:ring-gold/30 dark:border-white/10 dark:bg-white/[0.04] dark:text-cream dark:placeholder:text-cream/30"
+                            />
+                          </label>
+                        ) : null}
+                      </Fragment>
                     ))}
 
                     <fieldset>
                       <legend className="text-sm font-semibold text-ink dark:text-cream">
                         呕吐次数
+                        {aiFilled.has('vomit_count') ? <AiDot /> : null}
                       </legend>
                       <p className="mt-0.5 text-[11px] text-muted">
                         今天一共吐了几次
@@ -455,7 +771,9 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
                       <div className="mt-2 flex gap-1.5">
                         {VOMIT_OPTIONS.map((option) => {
                           const selected =
-                            values.vomit_count === option.value;
+                            option.value === 3
+                              ? (values.vomit_count ?? 0) >= 3
+                              : values.vomit_count === option.value;
 
                           return (
                             <button
@@ -484,7 +802,10 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
 
                     <label className="block">
                       <span className="mb-2 flex items-baseline justify-between gap-2 text-sm font-semibold text-ink dark:text-cream">
-                        体重（克）
+                        <span className="inline-flex items-center">
+                          体重（克）
+                          {aiFilled.has('weight_g') ? <AiDot /> : null}
+                        </span>
                         <span className="text-[11px] font-normal text-muted">
                           可选
                         </span>
@@ -493,7 +814,10 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
                         type="number"
                         name="weight_g"
                         value={weight}
-                        onChange={(event) => setWeight(event.target.value)}
+                        onChange={(event) => {
+                          setWeight(event.target.value);
+                          clearAiMark('weight_g');
+                        }}
                         inputMode="numeric"
                         min={500}
                         max={15000}
@@ -505,7 +829,10 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
 
                     <label className="block">
                       <span className="mb-2 flex items-baseline justify-between gap-2 text-sm font-semibold text-ink dark:text-cream">
-                        备注
+                        <span className="inline-flex items-center">
+                          备注
+                          {aiFilled.has('note') ? <AiDot /> : null}
+                        </span>
                         <span className="text-[11px] font-normal text-muted">
                           可选
                         </span>
@@ -514,7 +841,10 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
                         type="text"
                         name="note"
                         value={note}
-                        onChange={(event) => setNote(event.target.value)}
+                        onChange={(event) => {
+                          setNote(event.target.value);
+                          clearAiMark('note');
+                        }}
                         maxLength={200}
                         placeholder="例如：今天胃口不错"
                         className="h-12 w-full rounded-2xl border border-ink/10 bg-white/60 px-4 text-[15px] text-ink outline-none transition placeholder:text-muted/60 focus:border-gold focus:ring-2 focus:ring-gold/30 dark:border-white/10 dark:bg-white/[0.04] dark:text-cream dark:placeholder:text-cream/30"
