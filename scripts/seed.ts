@@ -67,7 +67,7 @@ const seed = sqlite.transaction(() => {
     .run(
       catId,
       '煤球',
-      '2023-03-15',
+      '2025-09-01',
       'F',
       0,
       null,
