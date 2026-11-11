@@ -28,7 +28,9 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // 放行静态资源与 PWA 相关的根路径文件：/icons/*、/icon.png、/apple-icon.png、
+  // /favicon.png、/manifest.webmanifest 都不能被登录跳转拦掉，否则加桌面图标会坏掉。
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons).*)',
+    '/((?!api|_next/static|_next/image|icons/|manifest.webmanifest|.*\\.(?:png|jpg|jpeg|svg|ico|webp|txt|xml|json|webmanifest)$).*)',
   ],
 };

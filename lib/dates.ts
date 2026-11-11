@@ -67,7 +67,7 @@ export function inclusiveDayNumber(startDate: string, today: string): number {
   return daysBetween(startDate, today) + 1;
 }
 
-/** 「11月12日」这种中文短日期。 */
+/** 「11月12日」这种中文短日期；跨年时带上年份（如「2027年8月14日」）。 */
 export function formatDateCn(date: string): string {
   if (!isValidDateString(date)) {
     return date;
@@ -76,9 +76,12 @@ export function formatDateCn(date: string): string {
   const [year, month, day] = dateParts(date);
   // 取上海中午，避免任何时区转换把日期推过零点。
   const value = new Date(Date.UTC(year, month - 1, day, 4));
+  const currentYear = Number(todayInShanghai().slice(0, 4));
+  const withYear = year !== currentYear;
 
   return new Intl.DateTimeFormat('zh-CN', {
     timeZone: SHANGHAI_TIME_ZONE,
+    ...(withYear ? { year: 'numeric' } : {}),
     month: 'long',
     day: 'numeric',
   }).format(value);
