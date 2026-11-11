@@ -32,9 +32,35 @@ npm run dev                   # http://localhost:3000
 |---|---|
 | `npm run dev` | 开发服务器 |
 | `npm run ci` | 类型检查 + 数据库冒烟 + 构建（提交前必跑） |
-| `npm run db:reset` | 删库重建 + 种子数据 |
+| `npm run db:reset` | 删库重建 + 种子数据（**只用于开发**） |
 | `npm run build` | 生产构建 |
 | `docker compose up -d --build` | 生产容器（127.0.0.1:3100） |
+| `npm run db:seed-prod` | 生产库只建猫、不写假记录 |
+| `npm run user:set` | 创建/更新账号并绑定猫（密码走环境变量） |
+
+## 部署
+
+线上跑在 `~/apps/cati-release`（git worktree，只 checkout tag，不写代码）：
+
+```bash
+cd ~/apps/cati-release
+git reset --hard v0.3.0 && docker compose up -d --build
+curl -s http://127.0.0.1:3100/api/health   # {"ok":true,...}
+```
+
+反向代理：1Panel OpenResty 的 `cati.cocodemo.cloud.conf` → `127.0.0.1:3100`，容器不对外暴露端口。
+
+**首次上线 / 换库**：
+
+```bash
+rm -f data/cat.db*          # 只有确定要清空时才做
+npm run db:migrate
+CAT_DB=./data/cat.db npm run db:seed-prod
+CAT_USER_EMAIL=you@example.com CAT_USER_PASSWORD='至少8位' CAT_USER_NAME='家长' npm run user:set
+```
+
+备份就是拷 `data/cat.db`（WAL 模式下请先 `sqlite3 data/cat.db ".backup data/backup.db"`）。回滚 = `git reset --hard <上一个 tag>` + 重建容器，迁移只向前。
+
 
 ## 目录
 
