@@ -40,5 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# app data
-data/
+# app data（只忽略仓库根目录的数据库，避免误伤 app/(tabs)/data/）
+/data/

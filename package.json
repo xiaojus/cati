@@ -11,7 +11,9 @@
     "db:reset": "rm -f \"${CAT_DB:-./data/cat.db}\" \"${CAT_DB:-./data/cat.db}-wal\" \"${CAT_DB:-./data/cat.db}-shm\" && npm run db:migrate && npm run db:seed",
     "typecheck": "tsc --noEmit",
     "ci": "bash scripts/ci.sh",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "user:set": "node scripts/user-set.ts",
+    "db:seed-prod": "node scripts/seed-prod.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

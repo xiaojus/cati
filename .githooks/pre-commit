@@ -19,7 +19,7 @@ EOF
 fi
 
 staged=$(git diff --cached --name-only)
-blocked=$(printf '%s\n' "$staged" | grep -E '(^|/)(\.env$|\.env\.local$|data/|uploads/|node_modules/)' || true)
+blocked=$(printf '%s\n' "$staged" | grep -E '(^|/)(\.env$|\.env\.local$)|^(data|uploads|node_modules)/' || true)
 if [ -n "$blocked" ]; then
   echo "✘ 检测到不该提交的文件：" >&2
   echo "$blocked" >&2
