@@ -33,8 +33,9 @@ jobs:
       - name: 冒烟 /api/health
         run: |
           set -e
-          export CAT_DB=./data/cat.db
-          mkdir -p data
+          # standalone 的 cwd 是 .next/standalone，相对路径会指错库，这里用绝对路径
+          export CAT_DB="$GITHUB_WORKSPACE/data/cat.db"
+          mkdir -p "$GITHUB_WORKSPACE/data"
           npm run db:reset
           node .next/standalone/server.js & echo $! > /tmp/srv.pid
           for i in $(seq 1 30); do
