@@ -1,7 +1,8 @@
 import { connection } from 'next/server';
 import { sqlite } from '@/lib/db';
 
-export const runtime = 'nodejs';
+// Next 16 的 cacheComponents 与 route segment config `runtime` 不兼容，
+// node 运行时本就是默认值，不再显式声明。
 
 function countRows(table: string): number {
   const row = sqlite.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as {

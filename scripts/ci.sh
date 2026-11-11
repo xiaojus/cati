@@ -17,23 +17,7 @@ CI_DB="./data/ci-smoke.db"
 export CAT_DB="$CI_DB"
 rm -f "$CI_DB" "$CI_DB-wal" "$CI_DB-shm"
 npm run db:reset >/dev/null 2>&1 || die "db:reset 失败"
-node -e '
-const Database = require("better-sqlite3");
-const db = new Database(process.env.CAT_DB, { readonly: true });
-const q = (s) => db.prepare(s).get();
-const need = { users: 1, cats: 1, daily_logs: 14, records: 3 };
-let bad = [];
-for (const [t, min] of Object.entries(need)) {
-  const n = q(`select count(*) c from ${t}`).c;
-  if (n < min) bad.push(`${t}=${n} (期望>=${min})`);
-}
-const cols = db.prepare("select name from sqlite_master where type=\"table\"").all().map(r => r.name);
-for (const t of ["users","sessions","cats","cat_members","daily_logs","records","ai_parses"]) {
-  if (!cols.includes(t)) bad.push(`缺表 ${t}`);
-}
-if (bad.length) { console.error("断言失败: " + bad.join(", ")); process.exit(1); }
-console.log("计数与表结构正常");
-' || die "数据库断言失败"
+node scripts/ci-assert.cjs || die "数据库断言失败"
 rm -f "$CI_DB" "$CI_DB-wal" "$CI_DB-shm"
 unset CAT_DB
 ok "数据库冒烟通过"

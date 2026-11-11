@@ -13,7 +13,7 @@
 ## 硬性约束（写错会直接编译失败）
 
 1. **Next 16**：`cookies()` / `headers()` 是**异步**的 → `const c = await cookies()`；`params` / `searchParams` 是 Promise → `await params`
-2. 用了 better-sqlite3 的 route / page 必须 `export const runtime = 'nodejs'`，且不能是纯静态页面
+2. 用了 better-sqlite3 的 route / page：**不要写 `export const runtime = 'nodejs'`** —— Next 16 开了 `cacheComponents`，route segment config `runtime` 与之冲突会直接构建失败；node 运行时是默认值。需要禁用预渲染时用 `export const dynamic = 'force-dynamic'`
 3. Drizzle 只在**服务端** import。客户端组件不要引 `lib/db.ts`
 4. Tailwind v4：不要新建 `tailwind.config.js`；自定义颜色写在 `globals.css` 的 `@theme { --color-*: ... }`
 5. 所有 `useState`/事件 的组件加 `'use client'`；recharts 只能在客户端组件里用
