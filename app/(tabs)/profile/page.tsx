@@ -2,13 +2,14 @@ import { and, asc, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import {
   Cat,
   ChevronDown,
+  ChevronRight,
   HardDrive,
   History,
-  Palette,
+  Settings2,
   ShieldAlert,
   UserRound,
 } from 'lucide-react';
-import { cookies } from 'next/headers';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -19,8 +20,6 @@ import CatProfileForm from '@/components/CatProfileForm';
 import FamilyMembers from '@/components/FamilyMembers';
 import HospitalCard from '@/components/HospitalCard';
 import LogoutButton from '@/components/LogoutButton';
-import ThemeToggle from '@/components/ThemeToggle';
-import type { Theme } from '@/components/ThemeToggle';
 import { getHospitalInfo, getIsolationStart } from '@/lib/app-settings';
 import { requireUser } from '@/lib/auth';
 import { requireCurrentCat } from '@/lib/current-cat';
@@ -182,9 +181,6 @@ export default async function ProfilePage({
     isolationDay >= 1 ? `第 ${isolationDay} 天` : '未开始';
   const dbInfo = readDbInfo();
   const displayName = user.displayName ?? '煤球家长';
-  const savedTheme = (await cookies()).get('cati_theme')?.value;
-  const initialTheme: Theme =
-    savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'system';
 
   return (
     <div className="pb-6">
@@ -406,17 +402,29 @@ export default async function ProfilePage({
 
         <div className="flex min-w-0 flex-col gap-4">
           <section className="rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06] md:order-2">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="flex shrink-0 items-center gap-2 text-sm font-semibold text-ink dark:text-cream">
-                <Palette
-                  size={15}
-                  className="text-gold-deep dark:text-gold"
-                  aria-hidden="true"
-                />
-                外观
-              </h2>
-              <ThemeToggle initial={initialTheme} />
-            </div>
+            <Link
+              href="/settings"
+              className="flex min-h-[44px] items-center justify-between gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold-deep dark:text-gold">
+                  <Settings2 size={18} aria-hidden="true" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-ink dark:text-cream">
+                    设置
+                  </span>
+                  <span className="block text-[11px] text-muted">
+                    AI 解析密钥 · 外观与主题
+                  </span>
+                </span>
+              </span>
+              <ChevronRight
+                size={16}
+                className="shrink-0 text-muted"
+                aria-hidden="true"
+              />
+            </Link>
           </section>
 
           <section className="rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06] md:order-1">
