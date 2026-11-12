@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/*
+ * 主题由 <html data-theme="system|light|dark"> 驱动。
+ * system 由根布局里同步执行的内联脚本在首屏绘制前解析为 light/dark，
+ * 所以 dark: 变体只认 data-theme 属性，不再依赖 prefers-color-scheme 媒体查询。
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   --color-ink: #17151a;
   --color-cream: #fff9f0;
@@ -16,8 +23,33 @@
 }
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   -webkit-tap-highlight-color: transparent;
+
+  /* 页面底色/正文色由 data-theme 驱动，不再走媒体查询。 */
+  --page-bg: var(--color-cream);
+  --page-fg: var(--color-ink);
+}
+
+/*
+ * 浅色主题的等值配色：深色 token 保持不变作为暗色基准，
+ * 这里只覆盖浅底上需要加深的语义色。
+ */
+:root[data-theme="light"] {
+  /*
+   * 金色只用于背景/描边，正文统一走组件里的
+   * text-gold-deep（浅色）→ dark:text-gold，主色本身保持 #F5B731。
+   * 珊瑚/薄荷在浅底上加深一档；次要文字达到 4.5:1 对比度。
+   */
+  --color-mint: #2f7d5b;
+  --color-coral: #c2472d;
+  --color-muted: #6b655a;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page-bg: var(--color-night);
+  --page-fg: var(--color-cream);
 }
 
 html,
@@ -26,8 +58,8 @@ body {
 }
 
 body {
-  background-color: var(--color-cream);
-  color: var(--color-ink);
+  background-color: var(--page-bg);
+  color: var(--page-fg);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -36,11 +68,4 @@ body {
 ::selection {
   background-color: var(--color-gold);
   color: var(--color-ink);
-}
-
-@media (prefers-color-scheme: dark) {
-  body {
-    background-color: var(--color-night);
-    color: var(--color-cream);
-  }
 }

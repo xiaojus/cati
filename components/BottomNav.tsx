@@ -18,7 +18,7 @@ export default function BottomNav() {
   return (
     <nav
       aria-label="主导航"
-      className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-[480px] border-t border-ink/[0.07] bg-cream/95 backdrop-blur-md dark:border-white/10 dark:bg-night/95"
+      className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-[480px] border-t border-ink/[0.07] bg-cream/95 backdrop-blur-md dark:border-white/10 dark:bg-night/95 lg:hidden"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <ul className="flex h-16 items-stretch">

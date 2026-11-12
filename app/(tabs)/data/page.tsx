@@ -171,8 +171,8 @@ export default async function DataPage({ searchParams }: DataPageProps) {
           />
         </section>
       ) : (
-        <div className="space-y-3">
-          <section className="rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+        <div className="grid gap-3 md:grid-cols-2 md:items-start">
+          <section className="min-w-0 rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
             <div className="mb-2 flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold text-ink dark:text-cream">
                 体重曲线
@@ -182,7 +182,7 @@ export default async function DataPage({ searchParams }: DataPageProps) {
             <WeightChart points={rangePoints} />
           </section>
 
-          <section className="rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+          <section className="min-w-0 rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
             <div className="mb-2 flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold text-ink dark:text-cream">
                 便便评分
@@ -199,7 +199,7 @@ export default async function DataPage({ searchParams }: DataPageProps) {
             <StoolChart points={rangePoints} />
           </section>
 
-          <section className="rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+          <section className="min-w-0 rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
             <div className="mb-2 flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold text-ink dark:text-cream">
                 食欲热图
@@ -211,7 +211,7 @@ export default async function DataPage({ searchParams }: DataPageProps) {
             <AppetiteHeatmap points={heatmapPoints} />
           </section>
 
-          <section className="rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+          <section className="min-w-0 rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
             <div className="mb-2 flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold text-ink dark:text-cream">
                 呕吐次数

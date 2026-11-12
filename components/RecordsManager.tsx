@@ -292,7 +292,7 @@ export default function RecordsManager({
         </section>
       ) : null}
 
-      <div className="space-y-5">
+      <div className="space-y-5 md:grid md:grid-cols-2 md:items-start md:gap-5 md:space-y-0">
         {grouped.map(({ key, items }) => {
           const meta = GROUP_META[key];
           const Icon = meta.Icon;
