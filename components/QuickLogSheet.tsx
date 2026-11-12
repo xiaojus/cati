@@ -10,7 +10,13 @@ import {
   useRef,
   useState,
 } from 'react';
+import type { ReactNode } from 'react';
 import { saveLog } from '@/app/actions/logs';
+import {
+  formatDateCn,
+  isValidDateString,
+  todayInShanghai,
+} from '@/lib/dates';
 
 type PointKey =
   | 'appetite'
@@ -47,7 +53,50 @@ type ParseApiResponse = {
 type QuickLogSheetProps = {
   today: string;
   catName: string;
+  initialDate?: string;
 };
+
+type QuickLogOpenDetail = {
+  initialDate?: string;
+};
+
+type QuickLogOpenButtonProps = {
+  initialDate?: string;
+  ariaLabel: string;
+  className?: string;
+  children: ReactNode;
+};
+
+const QUICK_LOG_OPEN_EVENT = 'cati:quick-log-open';
+
+/**
+ * 抽屉外部的打开入口（今日页状态卡 / 补记提醒）。
+ * 通过 window 事件把日期交给同一个 QuickLogSheet，避免整页变成客户端组件。
+ */
+export function QuickLogOpenButton({
+  initialDate,
+  ariaLabel,
+  className,
+  children,
+}: QuickLogOpenButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      aria-label={ariaLabel}
+      className={className}
+      onClick={() => {
+        window.dispatchEvent(
+          new CustomEvent<QuickLogOpenDetail>(QUICK_LOG_OPEN_EVENT, {
+            detail: { initialDate },
+          }),
+        );
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 const POINT_KEYS: readonly PointKey[] = [
   'appetite',
@@ -272,9 +321,17 @@ function SuccessOverlay({
   );
 }
 
-export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
+export default function QuickLogSheet({
+  today,
+  catName,
+  initialDate,
+}: QuickLogSheetProps) {
+  const defaultDate =
+    initialDate && isValidDateString(initialDate)
+      ? initialDate
+      : todayInShanghai();
   const [open, setOpen] = useState(false);
-  const [logDate, setLogDate] = useState(today);
+  const [logDate, setLogDate] = useState(defaultDate);
   const [values, setValues] = useState<PointValues>({ ...EMPTY_VALUES });
   const [stoolCount, setStoolCount] = useState('');
   const [weight, setWeight] = useState('');
@@ -314,21 +371,24 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
     };
   }, []);
 
-  const resetForm = useCallback(() => {
-    setLogDate(today);
-    setValues({ ...EMPTY_VALUES });
-    setStoolCount('');
-    setWeight('');
-    setNote('');
-    setError(null);
-    setAiText('');
-    setParsing(false);
-    setParseError(null);
-    setAiParseId(null);
-    setAiWarnings([]);
-    setAiDropped([]);
-    setAiFilled(new Set());
-  }, [today]);
+  const resetForm = useCallback(
+    (date: string = defaultDate) => {
+      setLogDate(date);
+      setValues({ ...EMPTY_VALUES });
+      setStoolCount('');
+      setWeight('');
+      setNote('');
+      setError(null);
+      setAiText('');
+      setParsing(false);
+      setParseError(null);
+      setAiParseId(null);
+      setAiWarnings([]);
+      setAiDropped([]);
+      setAiFilled(new Set());
+    },
+    [defaultDate],
+  );
 
   const closeSheet = useCallback(() => {
     if (lockedRef.current) {
@@ -368,11 +428,31 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
     };
   }, [open, closeSheet]);
 
-  function openSheet() {
-    resetForm();
-    setSuccess(false);
-    setOpen(true);
-  }
+  const openSheet = useCallback(
+    (date?: string) => {
+      resetForm(date);
+      setSuccess(false);
+      setOpen(true);
+    },
+    [resetForm],
+  );
+
+  useEffect(() => {
+    function handleOpenRequest(event: Event) {
+      const requested = (event as CustomEvent<QuickLogOpenDetail>).detail
+        ?.initialDate;
+
+      openSheet(
+        requested && isValidDateString(requested) && requested <= today
+          ? requested
+          : undefined,
+      );
+    }
+
+    window.addEventListener(QUICK_LOG_OPEN_EVENT, handleOpenRequest);
+    return () =>
+      window.removeEventListener(QUICK_LOG_OPEN_EVENT, handleOpenRequest);
+  }, [openSheet, today]);
 
   function clearAiMark(key: FieldKey) {
     setAiFilled((current) => {
@@ -538,7 +618,7 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
           <motion.button
             ref={fabRef}
             type="button"
-            onClick={openSheet}
+            onClick={() => openSheet()}
             whileTap={reduceMotion ? undefined : { scale: 0.96 }}
             aria-haspopup="dialog"
             aria-expanded={open}
@@ -585,10 +665,13 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
                     id={titleId}
                     className="text-lg font-bold text-ink dark:text-cream"
                   >
-                    给{catName}记一笔
+                    记录{' '}
+                    {logDate && isValidDateString(logDate)
+                      ? formatDateCn(logDate)
+                      : '今天'}
                   </h2>
                   <p className="mt-1 text-xs text-muted">
-                    30 秒记下今天的状态
+                    给{catName}记一笔 · 30 秒记下当天状态
                   </p>
                 </div>
                 <button

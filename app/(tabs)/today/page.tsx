@@ -12,7 +12,9 @@ import {
   Smile,
   Utensils,
 } from 'lucide-react';
-import QuickLogSheet from '@/components/QuickLogSheet';
+import QuickLogSheet, {
+  QuickLogOpenButton,
+} from '@/components/QuickLogSheet';
 import Sparkline from '@/components/Sparkline';
 import { requireUser } from '@/lib/auth';
 import {
@@ -115,6 +117,8 @@ type Alert = {
   tone: AlertTone;
   title: string;
   detail: string;
+  /** 点击后打开补记抽屉，并默认落在昨天。 */
+  backfill?: boolean;
 };
 
 type Trend = 'up' | 'down' | 'flat' | 'none';
@@ -266,6 +270,7 @@ function CatAvatar() {
 export default async function TodayPage() {
   const user = await requireUser();
   const today = todayInShanghai();
+  const yesterday = addDays(today, -1);
   const userName = user.displayName ?? user.email;
 
   const [cat] = await db
@@ -506,7 +511,8 @@ export default async function TodayPage() {
     alerts.push({
       tone: 'muted',
       title: `已 ${daysSinceLastLog} 天没记录`,
-      detail: '超过 48 小时没有打卡，记得补一条。',
+      detail: '超过 48 小时没有打卡，点这里补记昨天。',
+      backfill: true,
     });
   }
 
@@ -708,6 +714,14 @@ export default async function TodayPage() {
                 </p>
               ) : null}
             </div>
+
+            <QuickLogOpenButton
+              initialDate={yesterday}
+              ariaLabel="补记昨天的记录"
+              className="inline-flex min-h-[44px] shrink-0 items-center rounded-xl px-2 text-xs font-semibold text-gold-deep underline-offset-4 transition-colors hover:bg-gold/10 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold dark:text-gold"
+            >
+              补记昨天
+            </QuickLogOpenButton>
           </section>
 
           {alerts.length > 0 ? (
@@ -723,25 +737,43 @@ export default async function TodayPage() {
               <div className="space-y-2">
                 {alerts.map((alert) => {
                   const tone = ALERT_STYLES[alert.tone];
-
-                  return (
-                    <div
-                      key={alert.title}
-                      className={`flex items-start gap-2.5 rounded-[20px] border px-4 py-3 ${tone.container}`}
-                    >
+                  const cardClass = `flex w-full items-start gap-2.5 rounded-[20px] border px-4 py-3 text-left ${tone.container}`;
+                  const content = (
+                    <>
                       <AlertTriangle
                         size={16}
                         className={`mt-0.5 shrink-0 ${tone.icon}`}
                         aria-hidden="true"
                       />
-                      <div className="min-w-0">
-                        <p className={`text-sm font-semibold ${tone.title}`}>
+                      <span className="min-w-0">
+                        <span
+                          className={`block text-sm font-semibold ${tone.title}`}
+                        >
                           {alert.title}
-                        </p>
-                        <p className="mt-0.5 text-xs leading-5 text-muted">
+                        </span>
+                        <span className="mt-0.5 block text-xs leading-5 text-muted">
                           {alert.detail}
-                        </p>
-                      </div>
+                        </span>
+                      </span>
+                    </>
+                  );
+
+                  if (alert.backfill) {
+                    return (
+                      <QuickLogOpenButton
+                        key={alert.title}
+                        initialDate={yesterday}
+                        ariaLabel={`${alert.title}，补记昨天的记录`}
+                        className={`${cardClass} transition-colors hover:border-gold/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold`}
+                      >
+                        {content}
+                      </QuickLogOpenButton>
+                    );
+                  }
+
+                  return (
+                    <div key={alert.title} className={cardClass}>
+                      {content}
                     </div>
                   );
                 })}
@@ -854,7 +886,7 @@ export default async function TodayPage() {
         </div>
       </div>
 
-      <QuickLogSheet today={today} catName={cat.name} />
+      <QuickLogSheet today={today} catName={cat.name} initialDate={today} />
     </div>
   );
 }

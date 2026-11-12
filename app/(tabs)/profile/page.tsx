@@ -11,6 +11,7 @@ import { cookies } from 'next/headers';
 import { readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import CatEmpty, { CatPortrait } from '@/components/CatEmpty';
+import CatProfileForm from '@/components/CatProfileForm';
 import HospitalCard from '@/components/HospitalCard';
 import LogoutButton from '@/components/LogoutButton';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -119,6 +120,7 @@ export default async function ProfilePage() {
       neuteredAt: cats.neuteredAt,
       avatarUrl: cats.avatarUrl,
       note: cats.note,
+      role: catMembers.role,
     })
     .from(catMembers)
     .innerJoin(cats, eq(cats.id, catMembers.catId))
@@ -205,6 +207,17 @@ export default async function ProfilePage() {
                     </span>
                   </p>
                 </div>
+
+                {cat.role === 'owner' ? (
+                  <CatProfileForm
+                    name={cat.name}
+                    birthEst={cat.birthEst}
+                    sex={cat.sex}
+                    neutered={cat.neutered}
+                    neuteredAt={cat.neuteredAt}
+                    note={cat.note}
+                  />
+                ) : null}
               </div>
 
               <dl className="mt-4 grid grid-cols-2 gap-2.5">
