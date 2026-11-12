@@ -22,7 +22,18 @@ function createSqlite(): Database.Database {
   }
 
   const connection = new Database(dbPath);
-  connection.pragma('journal_mode = WAL');
+
+  // 构建期 next build 会用多个 worker 同时求值模块，几路一起打开同一个库时
+  // 切 WAL 需要写锁，拿不到会抛 SQLITE_BUSY 并让整个构建失败。
+  // 先给一个等待窗口；仍然失败就退回默认日志模式，不影响运行时正确性。
+  connection.pragma('busy_timeout = 5000');
+
+  try {
+    connection.pragma('journal_mode = WAL');
+  } catch (error) {
+    console.warn('[db] 切换 WAL 失败，继续用默认日志模式：', (error as Error).message);
+  }
+
   connection.pragma('foreign_keys = ON');
   return connection;
 }
