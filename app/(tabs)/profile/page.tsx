@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, isNull } from 'drizzle-orm';
 import {
   Cat,
   ChevronDown,
@@ -20,6 +20,7 @@ import CatProfileForm from '@/components/CatProfileForm';
 import FamilyMembers from '@/components/FamilyMembers';
 import HospitalCard from '@/components/HospitalCard';
 import LogoutButton from '@/components/LogoutButton';
+import ShareLinkCard from '@/components/ShareLinkCard';
 import { getHospitalInfo, getIsolationStart } from '@/lib/app-settings';
 import { requireUser } from '@/lib/auth';
 import { requireCurrentCat } from '@/lib/current-cat';
@@ -32,7 +33,7 @@ import {
 } from '@/lib/dates';
 import { db, dbPath } from '@/lib/db';
 import { EMPTY_HOSPITAL } from '@/lib/hospital';
-import { catMembers, invites, records, users } from '@/lib/schema';
+import { catMembers, invites, records, shareLinks, users } from '@/lib/schema';
 
 export const instant = false;
 
@@ -166,6 +167,22 @@ export default async function ProfilePage({
           .where(and(eq(invites.catId, cat.id), isNull(invites.usedBy)))
           .orderBy(desc(invites.createdAt))
       : [];
+
+  const activeShareLinks = await db
+    .select({
+      token: shareLinks.token,
+      expiresAt: shareLinks.expiresAt,
+      createdAt: shareLinks.createdAt,
+    })
+    .from(shareLinks)
+    .where(
+      and(
+        eq(shareLinks.catId, cat.id),
+        isNull(shareLinks.revokedAt),
+        gt(shareLinks.expiresAt, new Date().toISOString()),
+      ),
+    )
+    .orderBy(desc(shareLinks.createdAt));
 
   const sexLabel = cat.sex === 'F' ? '母' : cat.sex === 'M' ? '公' : '未知';
   const ageLabel = formatAgeLabel(cat.birthEst, today);
@@ -401,6 +418,8 @@ export default async function ProfilePage({
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
+          <ShareLinkCard catId={cat.id} initialLinks={activeShareLinks} />
+
           <section className="rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06] md:order-2">
             <Link
               href="/settings"

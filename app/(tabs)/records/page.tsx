@@ -1,12 +1,13 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gt, isNotNull, isNull } from 'drizzle-orm';
 import { Download } from 'lucide-react';
 import RecordsManager, {
   type RecordListItem,
 } from '@/components/RecordsManager';
+import ShareLinkCard from '@/components/ShareLinkCard';
 import { requireCurrentCat } from '@/lib/current-cat';
 import { todayInShanghai } from '@/lib/dates';
 import { db } from '@/lib/db';
-import { records, users } from '@/lib/schema';
+import { dailyLogs, records, shareLinks, users } from '@/lib/schema';
 
 export const instant = false;
 
@@ -21,6 +22,10 @@ export default async function RecordsPage() {
       name: records.name,
       eventDate: records.eventDate,
       dose: records.dose,
+      drugName: records.drugName,
+      doseMg: records.doseMg,
+      weightG: records.weightG,
+      photoPath: records.photoPath,
       nextDue: records.nextDue,
       cost: records.cost,
       vet: records.vet,
@@ -32,6 +37,31 @@ export default async function RecordsPage() {
     .leftJoin(users, eq(users.id, records.createdBy))
     .where(eq(records.catId, cat.id))
     .orderBy(desc(records.eventDate), desc(records.createdAt));
+
+  const [latestWeight] = await db
+    .select({ weightG: dailyLogs.weightG })
+    .from(dailyLogs)
+    .where(
+      and(eq(dailyLogs.catId, cat.id), isNotNull(dailyLogs.weightG)),
+    )
+    .orderBy(desc(dailyLogs.logDate))
+    .limit(1);
+
+  const activeShareLinks = await db
+    .select({
+      token: shareLinks.token,
+      expiresAt: shareLinks.expiresAt,
+      createdAt: shareLinks.createdAt,
+    })
+    .from(shareLinks)
+    .where(
+      and(
+        eq(shareLinks.catId, cat.id),
+        isNull(shareLinks.revokedAt),
+        gt(shareLinks.expiresAt, new Date().toISOString()),
+      ),
+    )
+    .orderBy(desc(shareLinks.createdAt));
 
   const items: RecordListItem[] = rows.map(
     ({ recorderDisplayName, recorderEmail, ...record }) => ({
@@ -66,7 +96,16 @@ export default async function RecordsPage() {
         </p>
       </header>
 
-      <RecordsManager records={items} today={today} catName={cat.name} />
+      <div className="mb-4">
+        <ShareLinkCard catId={cat.id} initialLinks={activeShareLinks} />
+      </div>
+
+      <RecordsManager
+        records={items}
+        today={today}
+        catName={cat.name}
+        latestWeightG={latestWeight?.weightG ?? null}
+      />
     </div>
   );
 }

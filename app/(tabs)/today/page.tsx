@@ -12,8 +12,10 @@ import {
   Smile,
   Utensils,
 } from 'lucide-react';
+import Link from 'next/link';
 import CatSwitcher from '@/components/CatSwitcher';
 import QuickLogSheet, {
+  PhotoThumb,
   QuickLogOpenButton,
 } from '@/components/QuickLogSheet';
 import Sparkline from '@/components/Sparkline';
@@ -45,6 +47,7 @@ type RecentLog = {
   stoolScore: number | null;
   vomitCount: number | null;
   energy: number | null;
+  photoPath: string | null;
 };
 
 const METRIC_CARDS = [
@@ -84,14 +87,6 @@ const METRIC_CARDS = [
 
 type MetricKey = (typeof METRIC_CARDS)[number]['key'];
 
-const RECORD_TYPE_LABELS: Record<string, string> = {
-  vaccine: '疫苗',
-  deworm_in: '驱虫',
-  deworm_out: '驱虫',
-  visit: '就诊',
-  med: '用药',
-};
-
 const ALERT_STYLES = {
   coral: {
     container: 'border-coral/25 bg-coral/10',
@@ -124,10 +119,67 @@ type Alert = {
 type Trend = 'up' | 'down' | 'flat' | 'none';
 
 type DueRecord = {
+  id: string;
   type: string;
   name: string | null;
+  eventDate: string;
+  createdAt: string;
   nextDue: string;
 };
+
+/** 「接下来」只聚合这四类记录；用药记录没有 next_due 的语义。 */
+const DUE_SCOPE_TYPES = [
+  'vaccine',
+  'deworm_in',
+  'deworm_out',
+  'visit',
+] as const;
+
+const DUE_TYPE_LABELS: Record<string, string> = {
+  vaccine: '疫苗',
+  deworm_in: '体内驱虫',
+  deworm_out: '体外驱虫',
+  visit: '就诊',
+};
+
+function dueCountdownLabel(days: number): string {
+  if (days === 0) {
+    return '今天';
+  }
+
+  return days > 0 ? `还有 ${days} 天` : `已过期 ${Math.abs(days)} 天`;
+}
+
+function dueToneClass(days: number): string {
+  if (days < 0) {
+    return 'text-coral';
+  }
+
+  return days <= 7 ? 'text-gold-deep dark:text-gold' : 'text-muted';
+}
+
+/** 出生日期到今天的整月数；日期非法时返回 null。 */
+function monthsSince(birthDate: string | null, today: string): number | null {
+  if (
+    !birthDate ||
+    !isValidDateString(birthDate) ||
+    !isValidDateString(today)
+  ) {
+    return null;
+  }
+
+  const [birthYear, birthMonth, birthDay] = birthDate.split('-').map(Number);
+  const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
+
+  let months =
+    (todayYear - birthYear) * 12 + (todayMonth - birthMonth);
+
+  if (todayDay < birthDay) {
+    months -= 1;
+  }
+
+  return months;
+}
 
 function formatKg(grams: number): string {
   return (grams / 1000).toFixed(2);
@@ -292,6 +344,7 @@ export default async function TodayPage() {
       stoolScore: dailyLogs.stoolScore,
       vomitCount: dailyLogs.vomitCount,
       energy: dailyLogs.energy,
+      photoPath: dailyLogs.photoPath,
     })
     .from(dailyLogs)
     .where(
@@ -306,6 +359,7 @@ export default async function TodayPage() {
   const logByDate = new Map(recentLogs.map((log) => [log.logDate, log]));
   const getLog = (date: string): RecentLog | null =>
     logByDate.get(date) ?? null;
+  const todayPhotoPath = getLog(today)?.photoPath ?? null;
 
   const [todayLog] = await db
     .select({
@@ -405,8 +459,11 @@ export default async function TodayPage() {
 
   const dueRecords = await db
     .select({
+      id: records.id,
       type: records.type,
       name: records.name,
+      eventDate: records.eventDate,
+      createdAt: records.createdAt,
       nextDue: records.nextDue,
     })
     .from(records)
@@ -417,10 +474,35 @@ export default async function TodayPage() {
     (record): record is DueRecord =>
       record.nextDue !== null && isValidDateString(record.nextDue),
   );
-  const nextDue =
-    validDue.find((record) => record.nextDue >= today) ??
-    [...validDue].reverse().find((record) => record.nextDue < today) ??
-    null;
+
+  // 同一类型可能有多条历史记录；只取最近一次事件带来的 next_due，
+  // 避免把几年前的旧到期日也堆进「接下来」。
+  const latestDueByType = new Map<string, DueRecord>();
+  for (const record of validDue) {
+    if (!(DUE_SCOPE_TYPES as readonly string[]).includes(record.type)) {
+      continue;
+    }
+
+    const current = latestDueByType.get(record.type);
+    if (
+      !current ||
+      record.eventDate > current.eventDate ||
+      (record.eventDate === current.eventDate &&
+        record.createdAt > current.createdAt)
+    ) {
+      latestDueByType.set(record.type, record);
+    }
+  }
+
+  const dueItems = [...latestDueByType.values()].sort((left, right) =>
+    left.nextDue.localeCompare(right.nextDue),
+  );
+
+  const catAgeMonths = monthsSince(cat.birthEst, today);
+  const suggestNeuter =
+    cat.neutered !== 1 &&
+    catAgeMonths !== null &&
+    catAgeMonths >= 6;
 
   const softStoolStreak = recentStreak(
     weekDates,
@@ -566,24 +648,6 @@ export default async function TodayPage() {
               Math.abs(weightDiff),
             )} 千克`;
 
-  const dueDays = nextDue
-    ? daysBetween(today, nextDue.nextDue)
-    : null;
-  const dueLabel =
-    dueDays === null
-      ? ''
-      : dueDays === 0
-        ? '就是今天'
-        : dueDays > 0
-          ? `还有 ${dueDays} 天`
-          : `已过期 ${Math.abs(dueDays)} 天`;
-  const dueTone =
-    dueDays !== null && dueDays < 0
-      ? 'text-coral'
-      : dueDays === 0
-        ? 'text-gold-deep dark:text-gold'
-        : 'text-ink dark:text-cream';
-
   return (
     <div className="pb-20">
       <TodayHeader today={today} userName={userName} />
@@ -674,6 +738,25 @@ export default async function TodayPage() {
               </div>
             </div>
           </section>
+
+          {todayPhotoPath ? (
+            <section className="rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-ink dark:text-cream">
+                    今天的照片
+                  </h2>
+                  <p className="mt-0.5 text-[11px] leading-5 text-muted">
+                    点击缩略图放大查看
+                  </p>
+                </div>
+                <PhotoThumb
+                  path={todayPhotoPath}
+                  alt={`${cat.name} 今天记录的照片`}
+                />
+              </div>
+            </section>
+          ) : null}
 
           <section
             className={`flex items-start gap-3 rounded-[20px] border px-4 py-3.5 ${
@@ -782,6 +865,74 @@ export default async function TodayPage() {
             </section>
           ) : null}
 
+          <section>
+            <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink dark:text-cream">
+              <CalendarClock
+                size={15}
+                className="text-gold-deep dark:text-gold"
+                aria-hidden="true"
+              />
+              接下来
+            </h2>
+
+            {dueItems.length === 0 && !suggestNeuter ? (
+              <p className="text-xs text-muted">暂时没有要到期的事</p>
+            ) : (
+              <div className="space-y-2">
+                {dueItems.map((item) => {
+                  const days = daysBetween(today, item.nextDue);
+                  const label = DUE_TYPE_LABELS[item.type] ?? '提醒';
+
+                  return (
+                    <Link
+                      key={item.id}
+                      href={`/records#${item.type}`}
+                      className="flex min-h-[44px] items-center gap-3 rounded-[20px] bg-white px-4 py-3 shadow-[0_2px_12px_rgba(23,21,26,0.06)] transition-colors hover:bg-gold/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold dark:bg-white/[0.06] dark:hover:bg-white/[0.09]"
+                    >
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold-deep dark:text-gold">
+                        <CalendarClock size={16} aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-ink dark:text-cream">
+                          {item.name ?? label}
+                        </span>
+                        <span className="mt-0.5 block text-[11px] text-muted">
+                          {label} · {formatDateCn(item.nextDue)}
+                        </span>
+                      </span>
+                      <span
+                        className={`shrink-0 text-xs font-semibold ${dueToneClass(days)}`}
+                      >
+                        {dueCountdownLabel(days)}
+                      </span>
+                    </Link>
+                  );
+                })}
+
+                {suggestNeuter ? (
+                  <Link
+                    href="/profile"
+                    className="flex min-h-[44px] items-center gap-3 rounded-[20px] bg-white px-4 py-3 shadow-[0_2px_12px_rgba(23,21,26,0.06)] transition-colors hover:bg-gold/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold dark:bg-white/[0.06] dark:hover:bg-white/[0.09]"
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-muted dark:bg-white/[0.08]">
+                      <CalendarClock size={16} aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-ink dark:text-cream">
+                        该安排绝育了
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-muted">
+                        未绝育 · 已满 6 个月
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs font-semibold text-muted">
+                      建议安排
+                    </span>
+                  </Link>
+                ) : null}
+              </div>
+            )}
+          </section>
         </div>
 
         <div className="min-w-0 space-y-4">
@@ -853,37 +1004,6 @@ export default async function TodayPage() {
             </div>
           </section>
 
-          <section>
-            <h2 className="mb-2 text-sm font-semibold text-ink dark:text-cream">
-              待办倒计时
-            </h2>
-
-            {nextDue ? (
-              <div className="flex items-center gap-4 rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold-deep dark:text-gold">
-                  <CalendarClock size={22} aria-hidden="true" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[11px] font-medium text-muted">
-                    {RECORD_TYPE_LABELS[nextDue.type] ?? '提醒'} ·{' '}
-                    {nextDue.name ?? '计划提醒'}
-                  </p>
-                  <p className={`mt-0.5 text-lg font-bold ${dueTone}`}>
-                    {dueLabel}
-                  </p>
-                </div>
-                <p className="shrink-0 text-right text-[11px] leading-5 text-muted">
-                  {formatDateCn(nextDue.nextDue)}
-                  <br />
-                  到期
-                </p>
-              </div>
-            ) : (
-              <div className="rounded-[20px] bg-white p-5 text-sm leading-6 text-muted shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
-                暂无待办。疫苗和驱虫的下次到期日会显示在这里。
-              </div>
-            )}
-          </section>
         </div>
       </div>
 

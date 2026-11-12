@@ -10,7 +10,13 @@ import {
   WeightChart,
   type DailyChartPoint,
 } from '@/components/DataCharts';
-import { addDays, lastNDates, todayInShanghai } from '@/lib/dates';
+import { PhotoThumb } from '@/components/QuickLogSheet';
+import {
+  addDays,
+  formatDateCn,
+  lastNDates,
+  todayInShanghai,
+} from '@/lib/dates';
 import { db } from '@/lib/db';
 import { dailyLogs } from '@/lib/schema';
 
@@ -42,6 +48,7 @@ export default async function DataPage({ searchParams }: DataPageProps) {
       stoolScore: dailyLogs.stoolScore,
       vomitCount: dailyLogs.vomitCount,
       weightG: dailyLogs.weightG,
+      photoPath: dailyLogs.photoPath,
     })
     .from(dailyLogs)
     .where(
@@ -74,6 +81,12 @@ export default async function DataPage({ searchParams }: DataPageProps) {
   const rangeLogCount = logs.filter(
     (log) => log.logDate >= rangeFrom,
   ).length;
+
+  const photoLogs = logs.flatMap((log) =>
+    log.photoPath && log.logDate >= rangeFrom
+      ? [{ logDate: log.logDate, photoPath: log.photoPath }]
+      : [],
+  );
 
   return (
     <div className="pb-6">
@@ -122,6 +135,32 @@ export default async function DataPage({ searchParams }: DataPageProps) {
           );
         })}
       </nav>
+
+      {photoLogs.length > 0 ? (
+        <section className="mb-4 rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold text-ink dark:text-cream">
+              照片
+            </h2>
+            <span className="text-[10px] text-muted">
+              {photoLogs.length} 张 · 点击放大
+            </span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {photoLogs.map((photo) => (
+              <figure key={photo.logDate} className="shrink-0">
+                <PhotoThumb
+                  path={photo.photoPath}
+                  alt={`${cat.name} ${photo.logDate} 的记录照片`}
+                />
+                <figcaption className="mt-1 text-center text-[10px] text-muted">
+                  {formatDateCn(photo.logDate)}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {rangeLogCount === 0 ? (
         <section className="rounded-[20px] bg-white shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
