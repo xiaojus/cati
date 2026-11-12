@@ -1,12 +1,13 @@
-import { and, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNotNull, isNull } from 'drizzle-orm';
 import { Download } from 'lucide-react';
 import RecordsManager, {
   type RecordListItem,
 } from '@/components/RecordsManager';
+import ShareLinkCard from '@/components/ShareLinkCard';
 import { requireCurrentCat } from '@/lib/current-cat';
 import { todayInShanghai } from '@/lib/dates';
 import { db } from '@/lib/db';
-import { dailyLogs, records, users } from '@/lib/schema';
+import { dailyLogs, records, shareLinks, users } from '@/lib/schema';
 
 export const instant = false;
 
@@ -46,6 +47,22 @@ export default async function RecordsPage() {
     .orderBy(desc(dailyLogs.logDate))
     .limit(1);
 
+  const activeShareLinks = await db
+    .select({
+      token: shareLinks.token,
+      expiresAt: shareLinks.expiresAt,
+      createdAt: shareLinks.createdAt,
+    })
+    .from(shareLinks)
+    .where(
+      and(
+        eq(shareLinks.catId, cat.id),
+        isNull(shareLinks.revokedAt),
+        gt(shareLinks.expiresAt, new Date().toISOString()),
+      ),
+    )
+    .orderBy(desc(shareLinks.createdAt));
+
   const items: RecordListItem[] = rows.map(
     ({ recorderDisplayName, recorderEmail, ...record }) => ({
       ...record,
@@ -78,6 +95,10 @@ export default async function RecordsPage() {
           {cat.name} · 共 {items.length} 条健康记录
         </p>
       </header>
+
+      <div className="mb-4">
+        <ShareLinkCard catId={cat.id} initialLinks={activeShareLinks} />
+      </div>
 
       <RecordsManager
         records={items}

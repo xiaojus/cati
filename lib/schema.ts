@@ -125,6 +125,25 @@ export const records = sqliteTable('records', {
  * 普通用户即使数据库里被改成 1，服务端也会拒绝。
  * `key_cipher` 为空字符串表示这只配置行只用来记录站点密钥开关，没有个人密钥。
  */
+/**
+ * 给兽医看的一周摘要分享链接。
+ *
+ * token 是 32 位 base62 随机串，不能用自增或可预测值。
+ * 过期 / 作废都只读取这一张表，不改动健康记录本身。
+ */
+export const shareLinks = sqliteTable('share_links', {
+  token: text('token').primaryKey(),
+  catId: text('cat_id')
+    .notNull()
+    .references(() => cats.id, { onDelete: 'cascade' }),
+  createdBy: text('created_by')
+    .notNull()
+    .references(() => users.id),
+  expiresAt: text('expires_at').notNull(),
+  revokedAt: text('revoked_at'),
+  createdAt: text('created_at').notNull(),
+});
+
 export const aiConfigs = sqliteTable('ai_configs', {
   userId: text('user_id')
     .primaryKey()
@@ -164,3 +183,5 @@ export type AiConfig = typeof aiConfigs.$inferSelect;
 export type NewAiConfig = typeof aiConfigs.$inferInsert;
 export type Record = typeof records.$inferSelect;
 export type NewRecord = typeof records.$inferInsert;
+export type ShareLink = typeof shareLinks.$inferSelect;
+export type NewShareLink = typeof shareLinks.$inferInsert;

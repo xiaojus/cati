@@ -15,14 +15,22 @@ export function middleware(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
   const isLoginPage = pathname === '/login';
   const isRegisterPage = pathname === '/register';
-  const isPublicPage = isLoginPage || isRegisterPage;
+
+  // 分享页只精确放行 /share/<32 位 base62 token>：
+  // /share、/share/abc 仍然走登录保护；/share/<token>/ 由 Next 在进入
+  // middleware 前 308 规范化到无尾斜杠路径，正则本身不匹配带尾斜杠的地址。
+  const isSharePage = /^\/share\/[A-Za-z0-9]{32}$/.test(pathname);
+
+  const isAuthPage = isLoginPage || isRegisterPage;
+  const isPublicPage = isAuthPage || isSharePage;
 
   if (!hasSession && !isPublicPage) {
     const loginUrl = new URL('/login', request.url);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (hasSession && isPublicPage) {
+  // 已登录访问登录/注册页时回首页；分享页对登录用户也保持可读。
+  if (hasSession && isAuthPage) {
     return NextResponse.redirect(new URL('/today', request.url));
   }
 
