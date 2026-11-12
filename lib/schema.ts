@@ -111,6 +111,28 @@ export const records = sqliteTable('records', {
   createdAt: text('created_at').notNull(),
 });
 
+/**
+ * 每用户独立的大模型配置。
+ *
+ * 站点默认密钥只允许 `users.is_site_admin = 1` 且 `use_site_key = 1` 的账号使用；
+ * 普通用户即使数据库里被改成 1，服务端也会拒绝。
+ * `key_cipher` 为空字符串表示这只配置行只用来记录站点密钥开关，没有个人密钥。
+ */
+export const aiConfigs = sqliteTable('ai_configs', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  baseUrl: text('base_url').notNull(),
+  model: text('model').notNull(),
+  keyCipher: text('key_cipher').notNull(),
+  keyHint: text('key_hint').notNull(),
+  verifiedAt: text('verified_at'),
+  useSiteKey: integer('use_site_key').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export const aiParses = sqliteTable('ai_parses', {
   id: text('id').primaryKey(),
   userId: text('user_id')
@@ -119,6 +141,7 @@ export const aiParses = sqliteTable('ai_parses', {
   rawText: text('raw_text').notNull(),
   parsedJson: text('parsed_json').notNull(),
   accepted: integer('accepted'),
+  usedSiteKey: integer('used_site_key').notNull().default(0),
   createdAt: text('created_at').notNull(),
 });
 
@@ -130,5 +153,7 @@ export type DailyLog = typeof dailyLogs.$inferSelect;
 export type NewDailyLog = typeof dailyLogs.$inferInsert;
 export type Invite = typeof invites.$inferSelect;
 export type NewInvite = typeof invites.$inferInsert;
+export type AiConfig = typeof aiConfigs.$inferSelect;
+export type NewAiConfig = typeof aiConfigs.$inferInsert;
 export type Record = typeof records.$inferSelect;
 export type NewRecord = typeof records.$inferInsert;

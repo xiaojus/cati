@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Check, Plus, X } from 'lucide-react';
+import Link from 'next/link';
 import {
   Fragment,
   useCallback,
@@ -45,6 +46,7 @@ type AiParseResult = {
 
 type ParseApiResponse = {
   ok?: boolean;
+  code?: string;
   data?: AiParseResult;
   aiParseId?: string | null;
   error?: string;
@@ -188,7 +190,7 @@ function parseErrorMessage(
   payload: ParseApiResponse | null,
 ): string {
   if (status === 503) {
-    return 'AI 解析未配置，先手动填吧';
+    return payload?.error ?? 'AI 解析未配置，先手动填吧';
   }
   if (status === 504) {
     return '解析超时，可以手动填';
@@ -347,6 +349,7 @@ export default function QuickLogSheet({
   const [aiText, setAiText] = useState('');
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [noAiConfig, setNoAiConfig] = useState(false);
   const [aiParseId, setAiParseId] = useState<string | null>(null);
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
   const [aiDropped, setAiDropped] = useState<string[]>([]);
@@ -389,6 +392,7 @@ export default function QuickLogSheet({
       setAiText('');
       setParsing(false);
       setParseError(null);
+      setNoAiConfig(false);
       setAiParseId(null);
       setAiWarnings([]);
       setAiDropped([]);
@@ -555,6 +559,7 @@ export default function QuickLogSheet({
 
     setParsing(true);
     setParseError(null);
+    setNoAiConfig(false);
     setAiParseId(null);
     setAiWarnings([]);
     setAiDropped([]);
@@ -570,6 +575,13 @@ export default function QuickLogSheet({
       const payload = (await response
         .json()
         .catch(() => null)) as ParseApiResponse | null;
+
+      if (response.status === 409 && payload?.code === 'NO_AI_CONFIG') {
+        // 未配置自己的密钥：不按错误处理，引导去设置页。
+        setNoAiConfig(true);
+        setParseError(null);
+        return;
+      }
 
       if (!response.ok || !payload?.ok || !payload.data) {
         setParseError(parseErrorMessage(response.status, payload));
@@ -829,6 +841,23 @@ export default function QuickLogSheet({
                         >
                           {parseError}
                         </p>
+                      ) : null}
+
+                      {noAiConfig ? (
+                        <div className="mt-2 rounded-xl border border-gold/30 bg-gold/10 px-3 py-2.5">
+                          <p className="text-xs font-semibold text-gold-deep dark:text-gold">
+                            先用你自己的模型密钥
+                          </p>
+                          <p className="mt-0.5 text-[11px] leading-5 text-gold-deep/80 dark:text-gold/80">
+                            去设置里填一下，就能用一句话记。
+                          </p>
+                          <Link
+                            href="/settings"
+                            className="mt-2 inline-flex h-11 min-h-[44px] items-center justify-center rounded-xl bg-gold px-4 text-xs font-bold text-ink transition-colors hover:bg-gold-deep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+                          >
+                            去设置
+                          </Link>
+                        </div>
                       ) : null}
                     </div>
 

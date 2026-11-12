@@ -1,7 +1,13 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { BarChart3, Cat, ClipboardList, Home, Palette } from 'lucide-react';
+import {
+  BarChart3,
+  Cat,
+  ClipboardList,
+  Home,
+  Settings2,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import CatSwitcher from '@/components/CatSwitcher';
@@ -68,11 +74,20 @@ export default function SideNav() {
 
       <div className="mt-auto border-t border-ink/[0.07] pt-4 dark:border-white/10">
         <Link
-          href="/profile"
-          className="flex h-11 min-h-[44px] items-center gap-3 rounded-2xl px-3 text-sm font-medium text-muted transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold dark:hover:bg-white/[0.06] dark:hover:text-cream"
+          href="/settings"
+          aria-current={pathname === '/settings' ? 'page' : undefined}
+          className={`flex h-11 min-h-[44px] items-center gap-3 rounded-2xl px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
+            pathname === '/settings'
+              ? 'bg-gold/10 text-gold-deep dark:text-gold'
+              : 'text-muted hover:bg-ink/[0.04] hover:text-ink dark:hover:bg-white/[0.06] dark:hover:text-cream'
+          }`}
         >
-          <Palette size={18} aria-hidden="true" />
-          外观与主题
+          <Settings2
+            size={18}
+            aria-hidden="true"
+            className={pathname === '/settings' ? 'text-gold-deep dark:text-gold' : 'text-muted'}
+          />
+          设置
         </Link>
       </div>
     </aside>

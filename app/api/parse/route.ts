@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import {
+  chatCompletionsUrl,
+  resolveAiRuntimeConfig,
+} from '@/lib/ai-config';
 import { getSessionUser } from '@/lib/auth';
 import { isValidDateString, todayInShanghai } from '@/lib/dates';
 import { db } from '@/lib/db';
 import { aiParses } from '@/lib/schema';
 
-const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions';
 const PARSE_TIMEOUT_MS = 8_000;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 10;
@@ -317,9 +320,25 @@ export async function POST(request: Request) {
 
   const text = textResult.data;
 
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) {
-    return fail(503, '未配置 AI 解析');
+  /*
+   * 取 key 的唯一入口：个人配置 → 仅管理员显式打开的站点 key → 无配置。
+   * 这里绝不能自己读 DEEPSEEK_API_KEY 做默认回落。
+   */
+  const runtime = await resolveAiRuntimeConfig(user.id);
+
+  if (runtime.status === 'no_config') {
+    return Response.json(
+      {
+        ok: false,
+        code: 'NO_AI_CONFIG',
+        error: '还没有配置你的模型密钥，去设置里填一下就能用一句话记',
+      },
+      { status: 409 },
+    );
+  }
+
+  if (runtime.status === 'decrypt_error') {
+    return fail(503, '模型密钥无法解密，请到设置里重新配置');
   }
 
   if (!allowRequest(user.id)) {
@@ -332,14 +351,14 @@ export async function POST(request: Request) {
 
   let content: string;
   try {
-    const response = await fetch(DEEPSEEK_ENDPOINT, {
+    const response = await fetch(chatCompletionsUrl(runtime.baseUrl), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${runtime.apiKey}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: runtime.model,
         messages: [
           { role: 'system', content: buildSystemPrompt(today) },
           { role: 'user', content: text },
@@ -352,7 +371,20 @@ export async function POST(request: Request) {
     });
 
     if (!response.ok) {
-      console.error('[api/parse] DeepSeek 返回异常', response.status);
+      console.error('[api/parse] 模型服务返回异常', response.status);
+
+      if (response.status === 401 || response.status === 403) {
+        return fail(502, '模型密钥不对，请到设置里检查');
+      }
+
+      if (response.status === 404) {
+        return fail(502, '模型名或接口地址不对，请到设置里检查');
+      }
+
+      if (response.status === 429) {
+        return fail(502, '模型服务限流，请稍后再试');
+      }
+
       return fail(502, '解析失败，请手动填写');
     }
 
@@ -362,7 +394,7 @@ export async function POST(request: Request) {
     const messageContent = completion.choices?.[0]?.message?.content;
 
     if (typeof messageContent !== 'string' || messageContent.trim() === '') {
-      console.error('[api/parse] DeepSeek 返回内容为空');
+      console.error('[api/parse] 模型返回内容为空');
       return fail(502, '解析失败，请手动填写');
     }
 
@@ -372,8 +404,11 @@ export async function POST(request: Request) {
       return fail(504, '解析超时，请手动填写');
     }
 
-    console.error('[api/parse] 请求 DeepSeek 失败', error);
-    return fail(502, '解析失败，请手动填写');
+    console.error(
+      '[api/parse] 请求模型服务失败',
+      error instanceof Error ? error.message : 'unknown',
+    );
+    return fail(502, '连接模型服务失败，请检查网络或设置里的 baseUrl');
   } finally {
     clearTimeout(timeout);
   }
@@ -400,6 +435,7 @@ export async function POST(request: Request) {
       rawText: text,
       parsedJson: JSON.stringify(data),
       accepted: 0,
+      usedSiteKey: runtime.usedSiteKey ? 1 : 0,
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
