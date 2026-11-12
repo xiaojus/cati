@@ -103,6 +103,13 @@ export const records = sqliteTable('records', {
   name: text('name'),
   eventDate: text('event_date').notNull(),
   dose: text('dose'),
+  /** 药名（驱虫记录用）。 */
+  drugName: text('drug_name'),
+  /** 剂量，单位毫克；滴剂等按 ml 记在 note 里。 */
+  doseMg: real('dose_mg'),
+  /** 给药时体重（克）。 */
+  weightG: integer('weight_g'),
+  photoPath: text('photo_path'),
   nextDue: text('next_due'),
   cost: real('cost'),
   vet: text('vet'),

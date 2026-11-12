@@ -7,6 +7,7 @@ services:
     env_file: .env
     environment:
       - CAT_DB=/app/data/cat.db
+      - UPLOAD_DIR=/app/uploads
       - TZ=Asia/Shanghai
       - NODE_ENV=production
     volumes:

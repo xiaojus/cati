@@ -1,8 +1,9 @@
 'use client';
 
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Check, Plus, X } from 'lucide-react';
+import { Check, ImagePlus, Plus, X } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Fragment,
   useCallback,
@@ -11,7 +12,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { ReactNode } from 'react';
+import type { ChangeEvent, ReactNode } from 'react';
 import { getLogConflict, saveLog } from '@/app/actions/logs';
 import {
   formatDateCn,
@@ -97,6 +98,119 @@ export function QuickLogOpenButton({
     >
       {children}
     </button>
+  );
+}
+
+const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+
+/** 与服务端 /api/upload 保持一致；服务端还会核对文件头。 */
+const PHOTO_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+]);
+
+function mediaUrl(path: string): string {
+  return `/api/media/${path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')}`;
+}
+
+/**
+ * 96×96 / 64×64 缩略图 + 点击全屏查看。
+ * 今日页、数据页和记录卡片共用，图片必须走带鉴权的 /api/media 路由。
+ */
+export function PhotoThumb({
+  path,
+  alt,
+  size = 'md',
+  className = '',
+}: {
+  path: string;
+  alt: string;
+  size?: 'sm' | 'md';
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const url = mediaUrl(path);
+  const dimensions = size === 'sm' ? 'h-16 w-16' : 'h-24 w-24';
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    const focusTimer = window.setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 60);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+      window.clearTimeout(focusTimer);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={`放大查看${alt}`}
+        aria-haspopup="dialog"
+        className={`${dimensions} shrink-0 overflow-hidden rounded-[16px] border border-ink/10 bg-ink/5 shadow-[0_2px_8px_rgba(23,21,26,0.08)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold dark:border-white/10 dark:bg-white/[0.06] ${className}`}
+      >
+        <img
+          src={url}
+          alt={alt}
+          loading="lazy"
+          className="h-full w-full object-cover"
+        />
+      </button>
+
+      {open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={alt}
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-ink/90 p-4 backdrop-blur-sm"
+        >
+          <button
+            type="button"
+            aria-label="点击背景关闭图片"
+            onClick={() => setOpen(false)}
+            className="absolute inset-0 h-full w-full cursor-zoom-out"
+          />
+          <img
+            src={url}
+            alt={alt}
+            className="relative max-h-[85dvh] max-w-full rounded-[20px] object-contain shadow-2xl"
+          />
+          <button
+            ref={closeButtonRef}
+            type="button"
+            aria-label="关闭图片"
+            onClick={() => setOpen(false)}
+            className="absolute right-4 top-[calc(1rem+env(safe-area-inset-top))] flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-cream backdrop-blur transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+          >
+            <X size={22} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -254,10 +368,12 @@ function ScoreGroup({
 function SuccessOverlay({
   catName,
   mergedWithName,
+  photoError,
   reduceMotion,
 }: {
   catName: string;
   mergedWithName: string | null;
+  photoError: string | null;
   reduceMotion: boolean;
 }) {
   return (
@@ -323,6 +439,14 @@ function SuccessOverlay({
           ? `已合并到 ${mergedWithName} 的记录`
           : `${catName}收到你的记录了`}
       </p>
+      {photoError ? (
+        <p
+          role="alert"
+          className="relative z-10 mt-3 max-w-[280px] text-center text-xs font-medium leading-5 text-coral"
+        >
+          {photoError}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -342,6 +466,10 @@ export default function QuickLogSheet({
   const [stoolCount, setStoolCount] = useState('');
   const [weight, setWeight] = useState('');
   const [note, setNote] = useState('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -357,7 +485,9 @@ export default function QuickLogSheet({
   const [conflictName, setConflictName] = useState<string | null>(null);
   const [mergedWithName, setMergedWithName] = useState<string | null>(null);
 
+  const router = useRouter();
   const conflictRequest = useRef(0);
+  const photoUrlRef = useRef<string | null>(null);
   const fabRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeTimer = useRef<number | null>(null);
@@ -378,8 +508,55 @@ export default function QuickLogSheet({
       if (closeTimer.current !== null) {
         window.clearTimeout(closeTimer.current);
       }
+      if (photoUrlRef.current) {
+        URL.revokeObjectURL(photoUrlRef.current);
+      }
     };
   }, []);
+
+  const clearPhoto = useCallback(() => {
+    if (photoUrlRef.current) {
+      URL.revokeObjectURL(photoUrlRef.current);
+      photoUrlRef.current = null;
+    }
+
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+    setPhotoUploadError(null);
+    setPhotoInputKey((value) => value + 1);
+  }, []);
+
+  function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+
+    if (!file) {
+      clearPhoto();
+      return;
+    }
+
+    if (!PHOTO_MIME_TYPES.has(file.type.toLowerCase())) {
+      setError('只支持 JPG / PNG / WebP / HEIC 图片');
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > MAX_PHOTO_BYTES) {
+      setError('图片不能超过 8MB');
+      event.target.value = '';
+      return;
+    }
+
+    if (photoUrlRef.current) {
+      URL.revokeObjectURL(photoUrlRef.current);
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    photoUrlRef.current = previewUrl;
+    setPhotoFile(file);
+    setPhotoPreviewUrl(previewUrl);
+    setPhotoUploadError(null);
+    setError(null);
+  }
 
   const resetForm = useCallback(
     (date: string = defaultDate) => {
@@ -388,6 +565,7 @@ export default function QuickLogSheet({
       setStoolCount('');
       setWeight('');
       setNote('');
+      clearPhoto();
       setError(null);
       setAiText('');
       setParsing(false);
@@ -400,7 +578,7 @@ export default function QuickLogSheet({
       setConflictName(null);
       setMergedWithName(null);
     },
-    [defaultDate],
+    [clearPhoto, defaultDate],
   );
 
   /** 查询该日期是否由别的家长记录过；只展示提示，不阻塞保存。 */
@@ -434,8 +612,9 @@ export default function QuickLogSheet({
     setOpen(false);
     setError(null);
     setSuccess(false);
+    clearPhoto();
     window.setTimeout(() => fabRef.current?.focus(), 0);
-  }, []);
+  }, [clearPhoto]);
 
   useEffect(() => {
     if (!open) {
@@ -633,6 +812,37 @@ export default function QuickLogSheet({
       setConflictName(null);
       setSuccess(true);
 
+      // 日志先落库，再凭返回的 id 上传照片；上传失败不回滚已保存的日志。
+      const fileToUpload = photoFile;
+      let photoFailed = false;
+
+      if (fileToUpload) {
+        try {
+          const body = new FormData();
+          body.append('file', fileToUpload);
+          body.append('kind', 'log');
+          body.append('id', result.id);
+
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            body,
+          });
+          const payload = (await response
+            .json()
+            .catch(() => null)) as { ok?: boolean } | null;
+
+          if (!response.ok || !payload?.ok) {
+            photoFailed = true;
+            setPhotoUploadError('图片上传失败，可稍后在记录里补');
+          } else {
+            router.refresh();
+          }
+        } catch {
+          photoFailed = true;
+          setPhotoUploadError('图片上传失败，可稍后在记录里补');
+        }
+      }
+
       if (
         typeof navigator !== 'undefined' &&
         typeof navigator.vibrate === 'function'
@@ -644,12 +854,15 @@ export default function QuickLogSheet({
         window.clearTimeout(closeTimer.current);
       }
 
-      closeTimer.current = window.setTimeout(() => {
-        setOpen(false);
-        setSuccess(false);
-        resetForm();
-        fabRef.current?.focus();
-      }, 1200);
+      closeTimer.current = window.setTimeout(
+        () => {
+          setOpen(false);
+          setSuccess(false);
+          resetForm();
+          fabRef.current?.focus();
+        },
+        photoFailed ? 2800 : 1200,
+      );
     } catch (cause) {
       console.error('[quick-log] 提交失败', cause);
       setError('保存失败，请检查网络后重试');
@@ -740,6 +953,7 @@ export default function QuickLogSheet({
                 <SuccessOverlay
                   catName={catName}
                   mergedWithName={mergedWithName}
+                  photoError={photoUploadError}
                   reduceMotion={reduceMotion}
                 />
               ) : (
@@ -1016,6 +1230,51 @@ export default function QuickLogSheet({
                         className="h-12 w-full rounded-2xl border border-ink/10 bg-white/60 px-4 text-[15px] text-ink outline-none transition placeholder:text-muted/60 focus:border-gold focus:ring-2 focus:ring-gold/30 dark:border-white/10 dark:bg-white/[0.04] dark:text-cream dark:placeholder:text-cream/30"
                       />
                     </label>
+
+                    <div className="rounded-2xl border border-dashed border-ink/15 bg-white/40 p-3.5 dark:border-white/15 dark:bg-white/[0.03]">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-ink dark:text-cream">
+                            照片
+                          </p>
+                          <p className="mt-0.5 text-[11px] leading-5 text-muted">
+                            便便异常、呕吐物、就诊单据，给兽医看更直观
+                          </p>
+                        </div>
+                        <label className="inline-flex h-11 min-h-[44px] shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-gold/15 px-3.5 text-xs font-semibold text-gold-deep transition-colors hover:bg-gold/25 focus-within:ring-2 focus-within:ring-gold dark:text-gold">
+                          <ImagePlus size={15} aria-hidden="true" />
+                          {photoPreviewUrl ? '换一张' : '拍照/选择图片'}
+                          <input
+                            key={photoInputKey}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handlePhotoChange}
+                            className="sr-only"
+                          />
+                        </label>
+                      </div>
+
+                      {photoPreviewUrl ? (
+                        <div className="mt-3 flex items-center gap-3">
+                          <img
+                            src={photoPreviewUrl}
+                            alt="待上传的照片预览"
+                            className="h-24 w-24 rounded-[16px] object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={clearPhoto}
+                            className="inline-flex h-11 min-h-[44px] items-center rounded-xl px-3 text-xs font-semibold text-coral transition-colors hover:bg-coral/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+                          >
+                            删除
+                          </button>
+                          <span className="min-w-0 flex-1 text-right text-[10px] leading-4 text-muted">
+                            保存日志后自动上传
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
 
                     {Object.entries(values).map(([key, value]) => (
                       <input

@@ -80,6 +80,24 @@ const saveRecordSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD')
     .refine(isValidDateString, '日期不存在'),
   dose: optionalText(40, '剂量'),
+  drug_name: optionalText(60, '药名'),
+  dose_mg: z.preprocess(
+    normalizeNumber,
+    z
+      .number({ error: '剂量（mg）必须是数字' })
+      .min(0, '剂量（mg）不能小于 0')
+      .max(100_000, '剂量（mg）不能超过 100000')
+      .optional(),
+  ),
+  weight_g: z.preprocess(
+    normalizeNumber,
+    z
+      .number({ error: '当时体重必须是数字' })
+      .int('当时体重必须是整数')
+      .min(500, '当时体重不能小于 500g')
+      .max(15_000, '当时体重不能超过 15000g')
+      .optional(),
+  ),
   next_due: z.preprocess(
     emptyToUndefined,
     z
@@ -116,6 +134,9 @@ function toRawInput(input: FormData | Record<string, unknown>) {
     name: readField(input, 'name'),
     event_date: readField(input, 'event_date'),
     dose: readField(input, 'dose'),
+    drug_name: readField(input, 'drug_name'),
+    dose_mg: readField(input, 'dose_mg'),
+    weight_g: readField(input, 'weight_g'),
     next_due: readField(input, 'next_due'),
     cost: readField(input, 'cost'),
     vet: readField(input, 'vet'),
@@ -170,11 +191,17 @@ export async function saveRecord(
       return { ok: false, error: '还没有猫咪档案，暂时不能保存记录' };
     }
 
+    // 用药明细只对驱虫记录有意义；其他类型即使客户端传了也清成 null。
+    const isDeworm = type === 'deworm_in' || type === 'deworm_out';
+
     const sharedFields = {
       type,
       name: data.name,
       eventDate: data.event_date,
       dose: data.dose ?? null,
+      drugName: isDeworm ? (data.drug_name ?? null) : null,
+      doseMg: isDeworm ? (data.dose_mg ?? null) : null,
+      weightG: isDeworm ? (data.weight_g ?? null) : null,
       nextDue,
       cost: data.cost ?? null,
       vet: data.vet ?? null,

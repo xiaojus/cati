@@ -13,7 +13,7 @@ import { aiParses, dailyLogs, users } from '@/lib/schema';
 type MergedWith = { name: string; updatedAt: string };
 
 type SaveLogResult =
-  | { ok: true; mergedWith?: MergedWith }
+  | { ok: true; id: string; mergedWith?: MergedWith }
   | { ok: false; error: string };
 
 export type LogConflict = MergedWith;
@@ -214,6 +214,7 @@ export async function saveLog(
   const { cat } = await requireCurrentCat();
 
   let mergedWith: MergedWith | undefined;
+  let savedId: string | undefined;
 
   try {
     // 同一天已有记录、且最后记录人不是当前用户时，仍允许合并，
@@ -263,7 +264,7 @@ export async function saveLog(
 
     const now = new Date().toISOString();
 
-    await db
+    const [saved] = await db
       .insert(dailyLogs)
       .values({
         id: randomUUID(),
@@ -285,7 +286,13 @@ export async function saveLog(
           updatedBy: user.id,
           updatedAt: now,
         },
-      });
+      })
+      .returning({ id: dailyLogs.id });
+
+    if (!saved) {
+      throw new Error('日志写入后没有返回 id');
+    }
+    savedId = saved.id;
 
     // 用户确认保存后，把对应的 AI 解析标记为已采纳；标记失败不影响日志本身。
     if (parsedAiParseId?.success) {
@@ -308,6 +315,12 @@ export async function saveLog(
     return { ok: false, error: '保存失败，请稍后再试' };
   }
 
+  if (!savedId) {
+    return { ok: false, error: '保存失败，请稍后再试' };
+  }
+
   revalidatePath('/today');
-  return mergedWith ? { ok: true, mergedWith } : { ok: true };
+  return mergedWith
+    ? { ok: true, id: savedId, mergedWith }
+    : { ok: true, id: savedId };
 }

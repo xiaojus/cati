@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import CatSwitcher from '@/components/CatSwitcher';
 import QuickLogSheet, {
+  PhotoThumb,
   QuickLogOpenButton,
 } from '@/components/QuickLogSheet';
 import Sparkline from '@/components/Sparkline';
@@ -45,6 +46,7 @@ type RecentLog = {
   stoolScore: number | null;
   vomitCount: number | null;
   energy: number | null;
+  photoPath: string | null;
 };
 
 const METRIC_CARDS = [
@@ -292,6 +294,7 @@ export default async function TodayPage() {
       stoolScore: dailyLogs.stoolScore,
       vomitCount: dailyLogs.vomitCount,
       energy: dailyLogs.energy,
+      photoPath: dailyLogs.photoPath,
     })
     .from(dailyLogs)
     .where(
@@ -306,6 +309,7 @@ export default async function TodayPage() {
   const logByDate = new Map(recentLogs.map((log) => [log.logDate, log]));
   const getLog = (date: string): RecentLog | null =>
     logByDate.get(date) ?? null;
+  const todayPhotoPath = getLog(today)?.photoPath ?? null;
 
   const [todayLog] = await db
     .select({
@@ -674,6 +678,25 @@ export default async function TodayPage() {
               </div>
             </div>
           </section>
+
+          {todayPhotoPath ? (
+            <section className="rounded-[20px] bg-white p-4 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-ink dark:text-cream">
+                    今天的照片
+                  </h2>
+                  <p className="mt-0.5 text-[11px] leading-5 text-muted">
+                    点击缩略图放大查看
+                  </p>
+                </div>
+                <PhotoThumb
+                  path={todayPhotoPath}
+                  alt={`${cat.name} 今天记录的照片`}
+                />
+              </div>
+            </section>
+          ) : null}
 
           <section
             className={`flex items-start gap-3 rounded-[20px] border px-4 py-3.5 ${
