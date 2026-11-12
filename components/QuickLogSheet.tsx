@@ -11,7 +11,7 @@ import {
   useState,
 } from 'react';
 import type { ReactNode } from 'react';
-import { saveLog } from '@/app/actions/logs';
+import { getLogConflict, saveLog } from '@/app/actions/logs';
 import {
   formatDateCn,
   isValidDateString,
@@ -251,9 +251,11 @@ function ScoreGroup({
 
 function SuccessOverlay({
   catName,
+  mergedWithName,
   reduceMotion,
 }: {
   catName: string;
+  mergedWithName: string | null;
   reduceMotion: boolean;
 }) {
   return (
@@ -315,7 +317,9 @@ function SuccessOverlay({
         记好啦
       </p>
       <p className="relative z-10 mt-1 text-sm text-muted">
-        {catName}收到你的记录了
+        {mergedWithName
+          ? `已合并到 ${mergedWithName} 的记录`
+          : `${catName}收到你的记录了`}
       </p>
     </div>
   );
@@ -347,7 +351,10 @@ export default function QuickLogSheet({
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
   const [aiDropped, setAiDropped] = useState<string[]>([]);
   const [aiFilled, setAiFilled] = useState<Set<FieldKey>>(() => new Set());
+  const [conflictName, setConflictName] = useState<string | null>(null);
+  const [mergedWithName, setMergedWithName] = useState<string | null>(null);
 
+  const conflictRequest = useRef(0);
   const fabRef = useRef<HTMLButtonElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeTimer = useRef<number | null>(null);
@@ -386,9 +393,33 @@ export default function QuickLogSheet({
       setAiWarnings([]);
       setAiDropped([]);
       setAiFilled(new Set());
+      setConflictName(null);
+      setMergedWithName(null);
     },
     [defaultDate],
   );
+
+  /** 查询该日期是否由别的家长记录过；只展示提示，不阻塞保存。 */
+  const refreshConflict = useCallback(async (date: string) => {
+    const requestId = conflictRequest.current + 1;
+    conflictRequest.current = requestId;
+
+    if (!isValidDateString(date)) {
+      setConflictName(null);
+      return;
+    }
+
+    try {
+      const conflict = await getLogConflict(date);
+      if (conflictRequest.current === requestId) {
+        setConflictName(conflict?.name ?? null);
+      }
+    } catch {
+      if (conflictRequest.current === requestId) {
+        setConflictName(null);
+      }
+    }
+  }, []);
 
   const closeSheet = useCallback(() => {
     if (lockedRef.current) {
@@ -430,11 +461,15 @@ export default function QuickLogSheet({
 
   const openSheet = useCallback(
     (date?: string) => {
-      resetForm(date);
+      const nextDate =
+        date && isValidDateString(date) ? date : defaultDate;
+
+      resetForm(nextDate);
       setSuccess(false);
       setOpen(true);
+      void refreshConflict(nextDate);
     },
-    [resetForm],
+    [defaultDate, refreshConflict, resetForm],
   );
 
   useEffect(() => {
@@ -477,6 +512,7 @@ export default function QuickLogSheet({
     if (data.date) {
       setLogDate(data.date);
       filled.add('date');
+      void refreshConflict(data.date);
     }
 
     const aiPoints: Partial<PointValues> = {};
@@ -581,6 +617,8 @@ export default function QuickLogSheet({
         return;
       }
 
+      setMergedWithName(result.mergedWith?.name ?? null);
+      setConflictName(null);
       setSuccess(true);
 
       if (
@@ -687,13 +725,29 @@ export default function QuickLogSheet({
               </div>
 
               {success ? (
-                <SuccessOverlay catName={catName} reduceMotion={reduceMotion} />
+                <SuccessOverlay
+                  catName={catName}
+                  mergedWithName={mergedWithName}
+                  reduceMotion={reduceMotion}
+                />
               ) : (
                 <form
                   action={handleSubmit}
                   className="flex min-h-0 flex-1 flex-col"
                 >
                   <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-5">
+                    {conflictName ? (
+                      <div
+                        role="status"
+                        className="rounded-2xl border border-gold/30 bg-gold/10 px-3.5 py-3 text-xs leading-5 text-gold-deep dark:text-gold"
+                      >
+                        <p className="font-semibold">
+                          {conflictName}{' '}
+                          {logDate === today ? '今天' : '这天'}已经记过，保存只会覆盖你填的项目
+                        </p>
+                      </div>
+                    ) : null}
+
                     {aiWarnings.length > 0 || aiDropped.length > 0 ? (
                       <div
                         role="status"
@@ -792,6 +846,7 @@ export default function QuickLogSheet({
                         onChange={(event) => {
                           setLogDate(event.target.value);
                           clearAiMark('date');
+                          void refreshConflict(event.target.value);
                         }}
                         className="h-12 w-full rounded-2xl border border-ink/10 bg-white/60 px-4 text-[15px] text-ink outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30 dark:border-white/10 dark:bg-white/[0.04] dark:text-cream"
                       />

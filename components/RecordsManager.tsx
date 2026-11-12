@@ -38,6 +38,8 @@ export type RecordListItem = {
   cost: number | null;
   vet: string | null;
   note: string | null;
+  /** 记录人昵称（无昵称时为邮箱前缀）；老数据可能为 null。 */
+  recorderName?: string | null;
 };
 
 type RecordsManagerProps = {
@@ -395,6 +397,10 @@ export default function RecordsManager({
                                 {record.note}
                               </p>
                             ) : null}
+
+                            <p className="mt-1.5 text-right text-[10px] text-muted">
+                              {record.recorderName ?? '家人'} 添加
+                            </p>
                           </div>
 
                           <div className="flex shrink-0 items-center">

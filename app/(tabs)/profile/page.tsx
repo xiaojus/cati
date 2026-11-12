@@ -1,5 +1,6 @@
-import { and, asc, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import {
+  Cat,
   ChevronDown,
   HardDrive,
   History,
@@ -8,16 +9,21 @@ import {
   UserRound,
 } from 'lucide-react';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import CatEmpty, { CatPortrait } from '@/components/CatEmpty';
+import { createCat } from '@/app/actions/cat';
+import { CatPortrait } from '@/components/CatEmpty';
+import { PetSwitchButton } from '@/components/CatSwitcher';
 import CatProfileForm from '@/components/CatProfileForm';
+import FamilyMembers from '@/components/FamilyMembers';
 import HospitalCard from '@/components/HospitalCard';
 import LogoutButton from '@/components/LogoutButton';
 import ThemeToggle from '@/components/ThemeToggle';
 import type { Theme } from '@/components/ThemeToggle';
-import { getHospitalInfo } from '@/lib/app-settings';
+import { getHospitalInfo, getIsolationStart } from '@/lib/app-settings';
 import { requireUser } from '@/lib/auth';
+import { requireCurrentCat } from '@/lib/current-cat';
 import {
   SHANGHAI_TIME_ZONE,
   formatAgeLabel,
@@ -27,12 +33,24 @@ import {
 } from '@/lib/dates';
 import { db, dbPath } from '@/lib/db';
 import { EMPTY_HOSPITAL } from '@/lib/hospital';
-import { catMembers, cats, records } from '@/lib/schema';
+import { catMembers, invites, records, users } from '@/lib/schema';
 
 export const instant = false;
 
 /** T4 任务卡规定的固定隔离起始日。 */
 const ISOLATION_START = '2026-11-11';
+
+/** 添加新宠物：createCat 会写入 owner 关系并自动切到新猫。 */
+async function addPetAction(formData: FormData) {
+  'use server';
+
+  const result = await createCat(formData);
+  if (!result.ok) {
+    redirect(`/profile?petError=${encodeURIComponent(result.error)}`);
+  }
+
+  redirect('/today');
+}
 
 const DANGER_SIGNALS = [
   {
@@ -106,51 +124,54 @@ function readDbInfo(): { size: string; backup: string } {
   }
 }
 
-export default async function ProfilePage() {
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ petError?: string }>;
+}) {
   const user = await requireUser();
+  const { cat, role, memberships } = await requireCurrentCat();
+  const { petError } = await searchParams;
   const today = todayInShanghai();
 
-  const [cat] = await db
+  const savedHospital = getHospitalInfo(cat.id);
+  const [latestVet] = await db
+    .select({ vet: records.vet })
+    .from(records)
+    .where(and(eq(records.catId, cat.id), isNotNull(records.vet)))
+    .orderBy(desc(records.eventDate))
+    .limit(1);
+
+  const hospital = {
+    ...savedHospital,
+    name: savedHospital.name || latestVet?.vet || '',
+  };
+
+  const members = await db
     .select({
-      id: cats.id,
-      name: cats.name,
-      birthEst: cats.birthEst,
-      sex: cats.sex,
-      neutered: cats.neutered,
-      neuteredAt: cats.neuteredAt,
-      avatarUrl: cats.avatarUrl,
-      note: cats.note,
+      userId: users.id,
+      displayName: users.displayName,
+      email: users.email,
       role: catMembers.role,
     })
     .from(catMembers)
-    .innerJoin(cats, eq(cats.id, catMembers.catId))
-    .where(eq(catMembers.userId, user.id))
-    .orderBy(asc(catMembers.catId))
-    .limit(1);
+    .innerJoin(users, eq(users.id, catMembers.userId))
+    .where(eq(catMembers.catId, cat.id))
+    .orderBy(asc(users.createdAt));
 
-  let hospital = { ...EMPTY_HOSPITAL };
+  const pendingInvites =
+    role === 'owner'
+      ? await db
+          .select({ code: invites.code, expiresAt: invites.expiresAt })
+          .from(invites)
+          .where(and(eq(invites.catId, cat.id), isNull(invites.usedBy)))
+          .orderBy(desc(invites.createdAt))
+      : [];
 
-  if (cat) {
-    const saved = getHospitalInfo(cat.id);
-    const [latestVet] = await db
-      .select({ vet: records.vet })
-      .from(records)
-      .where(and(eq(records.catId, cat.id), isNotNull(records.vet)))
-      .orderBy(desc(records.eventDate))
-      .limit(1);
-
-    hospital = {
-      ...saved,
-      name: saved.name || latestVet?.vet || '',
-    };
-  }
-
-  const sexLabel =
-    cat?.sex === 'F' ? '母' : cat?.sex === 'M' ? '公' : '未知';
-  const ageLabel = cat ? formatAgeLabel(cat.birthEst, today) : null;
-  const neuteredLabel = !cat
-    ? '—'
-    : cat.neutered === 1
+  const sexLabel = cat.sex === 'F' ? '母' : cat.sex === 'M' ? '公' : '未知';
+  const ageLabel = formatAgeLabel(cat.birthEst, today);
+  const neuteredLabel =
+    cat.neutered === 1
       ? cat.neuteredAt
         ? `已绝育 · ${formatDateCn(cat.neuteredAt)}`
         : '已绝育'
@@ -172,10 +193,18 @@ export default async function ProfilePage() {
         <h1 className="mt-1 text-[28px] font-bold tracking-tight">档案</h1>
       </header>
 
+      {petError ? (
+        <p
+          role="alert"
+          className="mb-4 rounded-2xl bg-coral/10 px-4 py-3 text-sm font-medium text-coral"
+        >
+          {petError}
+        </p>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-2 md:items-start">
         <div className="min-w-0 space-y-4">
-          {cat ? (
-            <section className="rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+          <section className="rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
               <div className="flex items-center gap-4">
                 <div className="relative h-[68px] w-[68px] shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-gold/35 via-gold/15 to-cream ring-1 ring-ink/5 dark:from-gold/30 dark:via-gold/10 dark:to-white/5 dark:ring-white/10">
                   {cat.avatarUrl ? (
@@ -208,13 +237,14 @@ export default async function ProfilePage() {
                   </p>
                 </div>
 
-                {cat.role === 'owner' ? (
+                {role === 'owner' ? (
                   <CatProfileForm
                     name={cat.name}
                     birthEst={cat.birthEst}
                     sex={cat.sex}
                     neutered={cat.neutered}
                     neuteredAt={cat.neuteredAt}
+                    isolationStart={getIsolationStart(cat.id)}
                     note={cat.note}
                   />
                 ) : null}
@@ -258,17 +288,120 @@ export default async function ProfilePage() {
                   {cat.note}
                 </p>
               ) : null}
-            </section>
-          ) : (
-            <section className="rounded-[20px] bg-white shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
-              <CatEmpty
-                title="还没有猫咪档案"
-                hint="数据库里还没有煤球的信息，先运行初始化脚本建立档案。"
-              />
-            </section>
-          )}
+          </section>
 
-          {cat ? <HospitalCard catId={cat.id} initial={hospital} /> : null}
+          <section
+            id="pets"
+            className="rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]"
+          >
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-ink dark:text-cream">
+              <Cat
+                size={15}
+                className="text-gold-deep dark:text-gold"
+                aria-hidden="true"
+              />
+              我的宠物
+            </h2>
+
+            <ul className="mt-3 space-y-2">
+              {memberships.map((membership) => {
+                const pet = membership.cat;
+                const current = pet.id === cat.id;
+
+                return (
+                  <li
+                    key={pet.id}
+                    className="flex items-center gap-3 rounded-2xl bg-ink/[0.035] p-3 dark:bg-white/[0.04]"
+                  >
+                    <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-gold/35 via-gold/15 to-cream ring-1 ring-ink/5 dark:from-gold/30 dark:via-gold/10 dark:to-white/5 dark:ring-white/10">
+                      {pet.avatarUrl ? (
+                        // 头像来自用户配置，可能是任意外链，这里用原生 img 避免域名白名单。
+                        <img
+                          src={pet.avatarUrl}
+                          alt={`${pet.name}的头像`}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <CatPortrait className="h-full w-full" />
+                      )}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink dark:text-cream">
+                        {pet.name}
+                        {current ? (
+                          <span className="ml-1 text-[11px] font-normal text-muted">
+                            （当前）
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="text-[11px] text-muted">
+                        {membership.role === 'owner' ? '创建者' : '家人'}
+                      </p>
+                    </div>
+
+                    {current ? (
+                      <span className="shrink-0 rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-semibold text-gold-deep dark:text-gold">
+                        当前
+                      </span>
+                    ) : (
+                      <PetSwitchButton catId={pet.id} catName={pet.name} />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            <form
+              action={addPetAction}
+              className="mt-4 space-y-3 border-t border-ink/[0.06] pt-4 dark:border-white/10"
+            >
+              <h3 className="text-xs font-semibold text-ink dark:text-cream">
+                添加另一只宠物
+              </h3>
+
+              <label className="block">
+                <span className="mb-1.5 block text-[11px] font-medium text-muted">
+                  名字
+                </span>
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  maxLength={20}
+                  placeholder="比如：年糕"
+                  className="h-12 w-full rounded-2xl border border-ink/10 bg-white/60 px-4 text-[15px] text-ink outline-none transition placeholder:text-muted/60 focus:border-gold focus:ring-2 focus:ring-gold/30 dark:border-white/10 dark:bg-white/[0.04] dark:text-cream dark:placeholder:text-cream/30"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-[11px] font-medium text-muted">
+                  出生日期（可空）
+                </span>
+                <input
+                  type="date"
+                  name="birth_est"
+                  className="h-12 w-full rounded-2xl border border-ink/10 bg-white/60 px-4 text-[15px] text-ink outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30 dark:border-white/10 dark:bg-white/[0.04] dark:text-cream"
+                />
+              </label>
+
+              <button
+                type="submit"
+                className="flex h-11 min-h-[44px] w-full items-center justify-center rounded-2xl bg-gold text-sm font-semibold text-ink transition-colors hover:bg-gold-deep active:bg-gold-deep"
+              >
+                添加宠物
+              </button>
+            </form>
+          </section>
+
+          <FamilyMembers
+            members={members}
+            initialInvites={pendingInvites}
+            isOwner={role === 'owner'}
+            currentUserId={user.id}
+          />
+
+          <HospitalCard catId={cat.id} initial={hospital} />
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">

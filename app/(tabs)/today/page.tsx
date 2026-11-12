@@ -12,11 +12,14 @@ import {
   Smile,
   Utensils,
 } from 'lucide-react';
+import CatSwitcher from '@/components/CatSwitcher';
 import QuickLogSheet, {
   QuickLogOpenButton,
 } from '@/components/QuickLogSheet';
 import Sparkline from '@/components/Sparkline';
+import { getIsolationStart } from '@/lib/app-settings';
 import { requireUser } from '@/lib/auth';
+import { requireCurrentCat } from '@/lib/current-cat';
 import {
   addDays,
   daysBetween,
@@ -30,13 +33,10 @@ import {
   todayInShanghai,
 } from '@/lib/dates';
 import { db } from '@/lib/db';
-import { catMembers, cats, dailyLogs, records, users } from '@/lib/schema';
+import { dailyLogs, records, users } from '@/lib/schema';
 
 // cacheComponents 下顶层读取 cookies() 会阻塞预渲染，这里显式允许阻塞。
 export const instant = false;
-
-/** T4 任务卡规定的固定隔离起始日；档案页落地前先作为常量。 */
-const ISOLATION_START = '2026-11-11';
 
 type RecentLog = {
   logDate: string;
@@ -269,42 +269,17 @@ function CatAvatar() {
 
 export default async function TodayPage() {
   const user = await requireUser();
+  const { cat, memberships } = await requireCurrentCat();
   const today = todayInShanghai();
   const yesterday = addDays(today, -1);
   const userName = user.displayName ?? user.email;
 
-  const [cat] = await db
-    .select({
-      id: cats.id,
-      name: cats.name,
-      birthEst: cats.birthEst,
-      sex: cats.sex,
-      avatarUrl: cats.avatarUrl,
-    })
-    .from(catMembers)
-    .innerJoin(cats, eq(cats.id, catMembers.catId))
-    .where(eq(catMembers.userId, user.id))
-    .orderBy(asc(catMembers.catId))
-    .limit(1);
-
-  if (!cat) {
-    return (
-      <div className="pb-20">
-        <TodayHeader today={today} userName={userName} />
-        <section className="rounded-[20px] bg-white p-6 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
-          <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-gold/15 text-gold-deep dark:text-gold">
-            <Activity size={26} aria-hidden="true" />
-          </span>
-          <h2 className="mt-4 text-lg font-semibold text-ink dark:text-cream">
-            还没有猫咪档案
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            先建立煤球的基础档案，就能在这里记录每日状态了。
-          </p>
-        </section>
-      </div>
-    );
-  }
+  const switcherCats = memberships.map((membership) => ({
+    id: membership.cat.id,
+    name: membership.cat.name,
+    avatarUrl: membership.cat.avatarUrl,
+    role: membership.role,
+  }));
 
   const weekDates = lastNDates(today, 7);
   const sevenDaysAgo = addDays(today, -7);
@@ -332,16 +307,35 @@ export default async function TodayPage() {
   const getLog = (date: string): RecentLog | null =>
     logByDate.get(date) ?? null;
 
-  const [todayStatus] = await db
+  const [todayLog] = await db
     .select({
       createdAt: dailyLogs.createdAt,
-      creatorName: users.displayName,
-      creatorEmail: users.email,
+      updatedAt: dailyLogs.updatedAt,
+      createdBy: dailyLogs.createdBy,
+      updatedBy: dailyLogs.updatedBy,
     })
     .from(dailyLogs)
-    .leftJoin(users, eq(users.id, dailyLogs.createdBy))
     .where(and(eq(dailyLogs.catId, cat.id), eq(dailyLogs.logDate, today)))
     .limit(1);
+
+  const todayRecorderId = todayLog?.updatedBy ?? todayLog?.createdBy ?? null;
+  const [todayRecorder] = todayRecorderId
+    ? await db
+        .select({ displayName: users.displayName, email: users.email })
+        .from(users)
+        .where(eq(users.id, todayRecorderId))
+        .limit(1)
+    : [];
+
+  const todayStatus = todayLog
+    ? {
+        createdAt: todayLog.updatedAt ?? todayLog.createdAt,
+        recorderName: todayRecorder
+          ? todayRecorder.displayName?.trim() ||
+            todayRecorder.email.split('@')[0]
+          : '家人',
+      }
+    : null;
 
   const recentWeights = await db
     .select({
@@ -541,13 +535,15 @@ export default async function TodayPage() {
   const subtitle =
     [sexLabel, ageLabel].filter(Boolean).join(' · ') || '年龄未知';
 
-  const isolationDayNumber = inclusiveDayNumber(ISOLATION_START, today);
+  // 隔离起始日是每只猫自己的设置：多猫时不能共用同一个常量。
+  const isolationStart = getIsolationStart(cat.id);
+  const isolationDayNumber = isolationStart
+    ? inclusiveDayNumber(isolationStart, today)
+    : 0;
   const isolationLabel =
     isolationDayNumber >= 1 ? `隔离第 ${isolationDayNumber} 天` : null;
 
-  const creatorLabel = todayStatus
-    ? todayStatus.creatorName ?? todayStatus.creatorEmail ?? '家人'
-    : null;
+  const creatorLabel = todayStatus?.recorderName ?? null;
   const recordedTime = todayStatus
     ? formatTimeCn(todayStatus.createdAt)
     : null;
@@ -621,6 +617,15 @@ export default async function TodayPage() {
                   </div>
 
                   <div className="shrink-0 text-right">
+                    {memberships.length > 1 ? (
+                      <div className="mb-1 flex justify-end lg:hidden">
+                        <CatSwitcher
+                          variant="mobile"
+                          currentCatId={cat.id}
+                          cats={switcherCats}
+                        />
+                      </div>
+                    ) : null}
                     <p className="text-[11px] text-muted">最新体重</p>
                     {latestWeight ? (
                       <>
@@ -662,7 +667,7 @@ export default async function TodayPage() {
                   <p className="mt-2 inline-flex max-w-full items-center gap-1 rounded-full bg-gold/15 px-2 py-0.5 text-[11px] font-medium text-gold-deep dark:text-gold">
                     <span className="whitespace-nowrap">{isolationLabel}</span>
                     <span className="whitespace-nowrap text-gold-deep/70 dark:text-gold/70">
-                      · 起始 {ISOLATION_START}
+                      · 起始 {isolationStart}
                     </span>
                   </p>
                 ) : null}
@@ -692,27 +697,23 @@ export default async function TodayPage() {
             </span>
 
             <div className="min-w-0 flex-1">
-              <div className="flex items-baseline justify-between gap-2">
-                <p
-                  className={`text-sm font-semibold ${
-                    todayStatus ? 'text-mint' : 'text-coral'
-                  }`}
-                >
-                  {todayStatus
-                    ? `已记录 · 记录人 ${creatorLabel}`
-                    : '今天还没记'}
+              <p
+                className={`text-sm font-semibold ${
+                  todayStatus ? 'text-mint' : 'text-coral'
+                }`}
+              >
+                {todayStatus ? '已记录' : '今天还没记'}
+              </p>
+              {todayStatus ? (
+                <p className="mt-0.5 text-xs text-mint/80">
+                  今天由 {creatorLabel} 记录
+                  {recordedTime ? ` · ${recordedTime}` : ''}
                 </p>
-                {recordedTime ? (
-                  <span className="shrink-0 text-[11px] text-mint/80">
-                    {recordedTime}
-                  </span>
-                ) : null}
-              </div>
-              {!todayStatus ? (
+              ) : (
                 <p className="mt-0.5 text-xs text-coral/80">
                   点右下角「记一笔」，30 秒记完。
                 </p>
-              ) : null}
+              )}
             </div>
 
             <QuickLogOpenButton

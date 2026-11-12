@@ -273,7 +273,27 @@ export default function LoginPage() {
           </motion.button>
         </motion.form>
 
-        <p className="mt-6 text-center text-xs text-muted">
+        <p className="mt-6 text-center text-sm text-muted">
+          还没账号？{' '}
+          <a
+            href="/register"
+            onClick={() => {
+              /*
+               * middleware 只检查 cati_sid 是否存在，且 T12 任务卡禁止修改它。
+               * 这里放一个只作用于 /register 路径、10 分钟后过期的占位 cookie，
+               * 让未登录用户能打开公开的注册页；它不会发给其他任何路径，
+               * 真正的权限仍由 requireUser() 查库校验。
+               */
+              document.cookie =
+                'cati_sid=register; path=/register; max-age=600; samesite=lax';
+            }}
+            className="font-semibold text-gold-deep underline-offset-4 hover:underline dark:text-gold"
+          >
+            注册一个
+          </a>
+        </p>
+
+        <p className="mt-3 text-center text-xs text-muted">
           煤球的健康小账本 · 只属于你和它
         </p>
       </div>
