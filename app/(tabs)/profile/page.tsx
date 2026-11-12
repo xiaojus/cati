@@ -3,14 +3,18 @@ import {
   ChevronDown,
   HardDrive,
   History,
+  Palette,
   ShieldAlert,
   UserRound,
 } from 'lucide-react';
+import { cookies } from 'next/headers';
 import { readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import CatEmpty, { CatPortrait } from '@/components/CatEmpty';
 import HospitalCard from '@/components/HospitalCard';
 import LogoutButton from '@/components/LogoutButton';
+import ThemeToggle from '@/components/ThemeToggle';
+import type { Theme } from '@/components/ThemeToggle';
 import { getHospitalInfo } from '@/lib/app-settings';
 import { requireUser } from '@/lib/auth';
 import {
@@ -155,6 +159,9 @@ export default async function ProfilePage() {
     isolationDay >= 1 ? `第 ${isolationDay} 天` : '未开始';
   const dbInfo = readDbInfo();
   const displayName = user.displayName ?? '煤球家长';
+  const savedTheme = (await cookies()).get('cati_theme')?.value;
+  const initialTheme: Theme =
+    savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : 'system';
 
   return (
     <div className="pb-6">
@@ -248,6 +255,20 @@ export default async function ProfilePage() {
         )}
 
         {cat ? <HospitalCard catId={cat.id} initial={hospital} /> : null}
+
+        <section className="rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="flex shrink-0 items-center gap-2 text-sm font-semibold text-ink dark:text-cream">
+              <Palette
+                size={15}
+                className="text-gold-deep dark:text-gold"
+                aria-hidden="true"
+              />
+              外观
+            </h2>
+            <ThemeToggle initial={initialTheme} />
+          </div>
+        </section>
 
         <section className="rounded-[20px] bg-white p-5 shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-ink dark:text-cream">
