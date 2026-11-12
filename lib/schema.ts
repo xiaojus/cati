@@ -12,6 +12,7 @@ export const users = sqliteTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   displayName: text('display_name'),
+  isSiteAdmin: integer('is_site_admin').default(0),
   createdAt: text('created_at').notNull(),
 });
 
@@ -50,6 +51,21 @@ export const catMembers = sqliteTable(
   (table) => [primaryKey({ columns: [table.catId, table.userId] })],
 );
 
+export const invites = sqliteTable('invites', {
+  code: text('code').primaryKey(),
+  catId: text('cat_id')
+    .notNull()
+    .references(() => cats.id, { onDelete: 'cascade' }),
+  createdBy: text('created_by')
+    .notNull()
+    .references(() => users.id),
+  role: text('role').notNull().default('member'),
+  expiresAt: text('expires_at').notNull(),
+  usedBy: text('used_by').references(() => users.id),
+  usedAt: text('used_at'),
+  createdAt: text('created_at').notNull(),
+});
+
 export const dailyLogs = sqliteTable(
   'daily_logs',
   {
@@ -69,6 +85,8 @@ export const dailyLogs = sqliteTable(
     photoPath: text('photo_path'),
     source: text('source').notNull().default('manual'),
     createdBy: text('created_by').references(() => users.id),
+    updatedBy: text('updated_by').references(() => users.id),
+    updatedAt: text('updated_at'),
     createdAt: text('created_at').notNull(),
   },
   (table) => [
@@ -110,5 +128,7 @@ export type Cat = typeof cats.$inferSelect;
 export type NewCat = typeof cats.$inferInsert;
 export type DailyLog = typeof dailyLogs.$inferSelect;
 export type NewDailyLog = typeof dailyLogs.$inferInsert;
+export type Invite = typeof invites.$inferSelect;
+export type NewInvite = typeof invites.$inferInsert;
 export type Record = typeof records.$inferSelect;
 export type NewRecord = typeof records.$inferInsert;

@@ -2,6 +2,7 @@
 
 import { asc, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
 import { isValidDateString, todayInShanghai } from '@/lib/dates';
@@ -9,6 +10,7 @@ import { db } from '@/lib/db';
 import { catMembers, cats } from '@/lib/schema';
 
 export type UpdateCatResult = { ok: true } | { ok: false; error: string };
+export type CreateCatResult = { ok: true } | { ok: false; error: string };
 
 function emptyToNull(value: unknown): unknown {
   if (typeof value === 'string') {
@@ -75,6 +77,95 @@ const updateCatSchema = z
       });
     }
   });
+
+const createCatSchema = z
+  .object({
+    name: z.preprocess(
+      (value) => (typeof value === 'string' ? value.trim() : value),
+      z
+        .string({ error: '给你的宠物起个名字吧' })
+        .min(1, '给你的宠物起个名字吧')
+        .max(20, '名字最多 20 个字'),
+    ),
+    birthEst: z.preprocess(
+      emptyToNull,
+      z
+        .string({ error: '生日格式不正确' })
+        .refine(isValidDateString, '生日日期不存在')
+        .nullable(),
+    ),
+  })
+  .superRefine((data, ctx) => {
+    if (data.birthEst && data.birthEst > todayInShanghai()) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['birthEst'],
+        message: '生日不能是未来',
+      });
+    }
+  });
+
+function readCreateCatInput(
+  input: FormData | Record<string, unknown>,
+): Record<string, unknown> {
+  if (!(input instanceof FormData)) {
+    return input;
+  }
+
+  const birthEst = input.get('birth_est') ?? input.get('birthEst');
+
+  return {
+    name: input.get('name'),
+    birthEst: typeof birthEst === 'string' ? birthEst : null,
+  };
+}
+
+/**
+ * 创建一只新宠物，并把当前用户写成 owner。
+ * 欢迎页「我是新家长」和后续的「添加宠物」都走这里。
+ */
+export async function createCat(
+  input: FormData | Record<string, unknown>,
+): Promise<CreateCatResult> {
+  const parsed = createCatSchema.safeParse(readCreateCatInput(input));
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? '宠物信息有误，请检查后重试',
+    };
+  }
+
+  const user = await requireUser();
+
+  try {
+    const catId = randomUUID();
+    const data = parsed.data;
+
+    db.transaction((tx) => {
+      tx.insert(cats)
+        .values({
+          id: catId,
+          name: data.name,
+          birthEst: data.birthEst,
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+
+      tx.insert(catMembers)
+        .values({ catId, userId: user.id, role: 'owner' })
+        .run();
+    });
+
+    revalidatePath('/welcome');
+    revalidatePath('/today');
+    revalidatePath('/profile');
+
+    return { ok: true };
+  } catch (error) {
+    console.error('[createCat] 创建失败', error);
+    return { ok: false, error: '创建失败，请稍后再试' };
+  }
+}
 
 /**
  * 更新当前用户绑定猫咪的档案。

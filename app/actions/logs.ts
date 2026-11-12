@@ -167,6 +167,8 @@ export async function saveLog(
       ...(data.note !== undefined ? { note: data.note } : {}),
     };
 
+    const now = new Date().toISOString();
+
     await db
       .insert(dailyLogs)
       .values({
@@ -176,7 +178,9 @@ export async function saveLog(
         ...providedFields,
         source: 'manual',
         createdBy: user.id,
-        createdAt: new Date().toISOString(),
+        updatedBy: user.id,
+        updatedAt: now,
+        createdAt: now,
       })
       .onConflictDoUpdate({
         target: [dailyLogs.catId, dailyLogs.logDate],
@@ -184,6 +188,8 @@ export async function saveLog(
           ...providedFields,
           source: 'manual',
           createdBy: user.id,
+          updatedBy: user.id,
+          updatedAt: now,
         },
       });
 

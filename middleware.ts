@@ -14,13 +14,15 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
   const isLoginPage = pathname === '/login';
+  const isRegisterPage = pathname === '/register';
+  const isPublicPage = isLoginPage || isRegisterPage;
 
-  if (!hasSession && !isLoginPage) {
+  if (!hasSession && !isPublicPage) {
     const loginUrl = new URL('/login', request.url);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (hasSession && isLoginPage) {
+  if (hasSession && isPublicPage) {
     return NextResponse.redirect(new URL('/today', request.url));
   }
 

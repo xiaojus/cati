@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import {
   ChevronDown,
   HardDrive,
@@ -12,6 +12,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import CatEmpty, { CatPortrait } from '@/components/CatEmpty';
 import CatProfileForm from '@/components/CatProfileForm';
+import FamilyMembers from '@/components/FamilyMembers';
 import HospitalCard from '@/components/HospitalCard';
 import LogoutButton from '@/components/LogoutButton';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -27,7 +28,7 @@ import {
 } from '@/lib/dates';
 import { db, dbPath } from '@/lib/db';
 import { EMPTY_HOSPITAL } from '@/lib/hospital';
-import { catMembers, cats, records } from '@/lib/schema';
+import { catMembers, cats, invites, records, users } from '@/lib/schema';
 
 export const instant = false;
 
@@ -144,6 +145,29 @@ export default async function ProfilePage() {
       name: saved.name || latestVet?.vet || '',
     };
   }
+
+  const members = cat
+    ? await db
+        .select({
+          userId: users.id,
+          displayName: users.displayName,
+          email: users.email,
+          role: catMembers.role,
+        })
+        .from(catMembers)
+        .innerJoin(users, eq(users.id, catMembers.userId))
+        .where(eq(catMembers.catId, cat.id))
+        .orderBy(asc(users.createdAt))
+    : [];
+
+  const pendingInvites =
+    cat && cat.role === 'owner'
+      ? await db
+          .select({ code: invites.code, expiresAt: invites.expiresAt })
+          .from(invites)
+          .where(and(eq(invites.catId, cat.id), isNull(invites.usedBy)))
+          .orderBy(desc(invites.createdAt))
+      : [];
 
   const sexLabel =
     cat?.sex === 'F' ? '母' : cat?.sex === 'M' ? '公' : '未知';
@@ -267,6 +291,15 @@ export default async function ProfilePage() {
               />
             </section>
           )}
+
+          {cat ? (
+            <FamilyMembers
+              members={members}
+              initialInvites={pendingInvites}
+              isOwner={cat.role === 'owner'}
+              currentUserId={user.id}
+            />
+          ) : null}
 
           {cat ? <HospitalCard catId={cat.id} initial={hospital} /> : null}
         </div>
