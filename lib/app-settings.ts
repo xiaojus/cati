@@ -65,3 +65,42 @@ export function saveHospitalInfo(catId: string, info: HospitalInfo): void {
     )
     .run(hospitalKey(catId), value, new Date().toISOString());
 }
+
+function isolationKey(catId: string): string {
+  return `isolation:${catId}`;
+}
+
+/** 每只猫自己的隔离起始日；没有设置返回 null（多猫时不能共用同一常量）。 */
+export function getIsolationStart(catId: string): string | null {
+  try {
+    ensureSettingsTable();
+
+    const row = sqlite
+      .prepare('SELECT value FROM app_settings WHERE key = ?')
+      .get(isolationKey(catId)) as { value: string } | undefined;
+
+    return row?.value ?? null;
+  } catch (error) {
+    console.error('[app-settings] 读取隔离起始日失败', error);
+    return null;
+  }
+}
+
+export function saveIsolationStart(catId: string, value: string | null): void {
+  ensureSettingsTable();
+
+  if (!value) {
+    sqlite.prepare('DELETE FROM app_settings WHERE key = ?').run(isolationKey(catId));
+    return;
+  }
+
+  sqlite
+    .prepare(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+    )
+    .run(isolationKey(catId), value, new Date().toISOString());
+}

@@ -13,12 +13,13 @@ type CatProfileFormProps = {
   sex: string | null;
   neutered: number | null;
   neuteredAt: string | null;
+  isolationStart: string | null;
   note: string | null;
 };
 
 type Sex = 'F' | 'M' | 'U';
 
-type FieldKey = 'name' | 'birthEst' | 'sex' | 'neuteredAt' | 'note';
+type FieldKey = 'name' | 'birthEst' | 'sex' | 'neuteredAt' | 'isolationStart' | 'note';
 
 type FieldErrors = Partial<Record<FieldKey, string>>;
 
@@ -56,6 +57,7 @@ export default function CatProfileForm({
   sex: initialSex,
   neutered: initialNeutered,
   neuteredAt: initialNeuteredAt,
+  isolationStart: initialIsolationStart,
   note: initialNote,
 }: CatProfileFormProps) {
   const router = useRouter();
@@ -65,6 +67,7 @@ export default function CatProfileForm({
   const [sex, setSex] = useState<Sex>(normalizeSex(initialSex));
   const [neutered, setNeutered] = useState(initialNeutered === 1);
   const [neuteredAt, setNeuteredAt] = useState(initialNeuteredAt ?? '');
+  const [isolationStart, setIsolationStart] = useState(initialIsolationStart ?? '');
   const [note, setNote] = useState(initialNote ?? '');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -178,6 +181,14 @@ export default function CatProfileForm({
       }
     }
 
+    if (isolationStart !== '') {
+      if (!isValidDateString(isolationStart)) {
+        next.isolationStart = '隔离起始日不正确';
+      } else if (isolationStart > currentToday) {
+        next.isolationStart = '隔离起始日不能是未来';
+      }
+    }
+
     if (note.trim().length > 200) {
       next.note = '备注最多 200 个字';
     }
@@ -208,6 +219,7 @@ export default function CatProfileForm({
         sex,
         neutered,
         neuteredAt: neutered ? neuteredAt || null : null,
+        isolationStart: isolationStart || null,
         note: note.trim() || null,
       });
 
@@ -422,6 +434,25 @@ export default function CatProfileForm({
                         选择「已绝育」后可填写
                       </p>
                     ) : null}
+                  </label>
+
+                  <label className="block">
+                    <span className={LABEL_CLASS}>隔离起始日（可选）</span>
+                    <input
+                      type="date"
+                      name="isolationStart"
+                      value={isolationStart}
+                      max={today}
+                      onChange={(event) => {
+                        setIsolationStart(event.target.value);
+                        clearError('isolationStart');
+                      }}
+                      className={INPUT_CLASS}
+                    />
+                    <FieldError message={errors.isolationStart} />
+                    <p className="mt-1 text-[11px] text-muted">
+                      填了才会在今日页显示「隔离第 N 天」，每只猫各自独立
+                    </p>
                   </label>
 
                   <label className="block">

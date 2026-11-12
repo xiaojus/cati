@@ -1,15 +1,22 @@
 'use server';
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { getSessionUser } from '@/lib/auth';
+import { requireUser } from '@/lib/auth';
+import { requireCurrentCat } from '@/lib/current-cat';
 import { isValidDateString, todayInShanghai } from '@/lib/dates';
 import { db } from '@/lib/db';
-import { aiParses, catMembers, dailyLogs } from '@/lib/schema';
+import { aiParses, dailyLogs, users } from '@/lib/schema';
 
-type SaveLogResult = { ok: true } | { ok: false; error: string };
+type MergedWith = { name: string; updatedAt: string };
+
+type SaveLogResult =
+  | { ok: true; mergedWith?: MergedWith }
+  | { ok: false; error: string };
+
+export type LogConflict = MergedWith;
 
 const aiParseIdSchema = z.uuid();
 
@@ -105,6 +112,76 @@ function toRawInput(input: FormData | Record<string, unknown>) {
   };
 }
 
+const logDateSchema = z
+  .string({ error: '请选择记录日期' })
+  .regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD')
+  .refine(isValidDateString, '记录日期不存在');
+
+/** 昵称优先，空昵称显示邮箱前缀。 */
+function recorderName(recorder: {
+  displayName: string | null;
+  email: string;
+}): string {
+  return (
+    recorder.displayName?.trim() ||
+    recorder.email.split('@')[0] ||
+    '家人'
+  );
+}
+
+async function findRecorderName(userId: string): Promise<string | null> {
+  const [recorder] = await db
+    .select({ displayName: users.displayName, email: users.email })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  return recorder ? recorderName(recorder) : null;
+}
+
+/**
+ * 抽屉打开 / 切换日期时查询冲突：该日期已有记录，且最后记录人不是当前用户。
+ * 只读，不写库。
+ */
+export async function getLogConflict(
+  logDate: string,
+): Promise<LogConflict | null> {
+  const parsed = logDateSchema.safeParse(logDate);
+  if (!parsed.success) {
+    return null;
+  }
+
+  const user = await requireUser();
+  const { cat } = await requireCurrentCat();
+
+  const [existing] = await db
+    .select({
+      createdBy: dailyLogs.createdBy,
+      updatedBy: dailyLogs.updatedBy,
+      createdAt: dailyLogs.createdAt,
+      updatedAt: dailyLogs.updatedAt,
+    })
+    .from(dailyLogs)
+    .where(
+      and(eq(dailyLogs.catId, cat.id), eq(dailyLogs.logDate, parsed.data)),
+    )
+    .limit(1);
+
+  if (!existing) {
+    return null;
+  }
+
+  const recorderId = existing.updatedBy ?? existing.createdBy;
+  if (!recorderId || recorderId === user.id) {
+    return null;
+  }
+
+  return {
+    name: (await findRecorderName(recorderId)) ?? '家人',
+    updatedAt: existing.updatedAt ?? existing.createdAt,
+  };
+}
+
 /**
  * 今日页的唯一写入口：同一天 upsert，只更新本次显式填写的字段。
  * 监控页只新增不编辑，因此这里不接受客户端传来的 catId / 记录 id。
@@ -132,21 +209,38 @@ export async function saveLog(
     return { ok: false, error: '不能记录未来的日期' };
   }
 
-  try {
-    const user = await getSessionUser();
-    if (!user) {
-      return { ok: false, error: '登录已过期，请重新登录后再试' };
-    }
+  // 在 try 外取用户和当前猫：redirect() 不能被下面的 catch 吞掉。
+  const user = await requireUser();
+  const { cat } = await requireCurrentCat();
 
-    const [membership] = await db
-      .select({ catId: catMembers.catId })
-      .from(catMembers)
-      .where(eq(catMembers.userId, user.id))
-      .orderBy(asc(catMembers.catId))
+  let mergedWith: MergedWith | undefined;
+
+  try {
+    // 同一天已有记录、且最后记录人不是当前用户时，仍允许合并，
+    // 但把对方信息带回前端，让用户知道保存会合并到谁的记录里。
+    const [existing] = await db
+      .select({
+        createdBy: dailyLogs.createdBy,
+        updatedBy: dailyLogs.updatedBy,
+        createdAt: dailyLogs.createdAt,
+        updatedAt: dailyLogs.updatedAt,
+      })
+      .from(dailyLogs)
+      .where(
+        and(
+          eq(dailyLogs.catId, cat.id),
+          eq(dailyLogs.logDate, data.log_date),
+        ),
+      )
       .limit(1);
 
-    if (!membership) {
-      return { ok: false, error: '还没有猫咪档案，暂时不能记录' };
+    const previousRecorderId =
+      existing?.updatedBy ?? existing?.createdBy ?? null;
+    if (existing && previousRecorderId && previousRecorderId !== user.id) {
+      mergedWith = {
+        name: (await findRecorderName(previousRecorderId)) ?? '家人',
+        updatedAt: existing.updatedAt ?? existing.createdAt,
+      };
     }
 
     // 只把本次填写的字段放进 set：空字段保持原值，不会被覆盖。
@@ -173,7 +267,7 @@ export async function saveLog(
       .insert(dailyLogs)
       .values({
         id: randomUUID(),
-        catId: membership.catId,
+        catId: cat.id,
         logDate: data.log_date,
         ...providedFields,
         source: 'manual',
@@ -187,7 +281,7 @@ export async function saveLog(
         set: {
           ...providedFields,
           source: 'manual',
-          createdBy: user.id,
+          // createdBy 保留第一次记录的人，只更新“最后记录人”。
           updatedBy: user.id,
           updatedAt: now,
         },
@@ -215,5 +309,5 @@ export async function saveLog(
   }
 
   revalidatePath('/today');
-  return { ok: true };
+  return mergedWith ? { ok: true, mergedWith } : { ok: true };
 }

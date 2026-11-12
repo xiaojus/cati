@@ -1,16 +1,46 @@
 'use server';
 
-import { asc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { saveIsolationStart } from '@/lib/app-settings';
 import { requireUser } from '@/lib/auth';
+import {
+  requireCurrentCat,
+  writeCurrentCatCookie,
+} from '@/lib/current-cat';
 import { isValidDateString, todayInShanghai } from '@/lib/dates';
 import { db } from '@/lib/db';
 import { catMembers, cats } from '@/lib/schema';
 
 export type UpdateCatResult = { ok: true } | { ok: false; error: string };
 export type CreateCatResult = { ok: true } | { ok: false; error: string };
+export type SetCurrentCatResult = { ok: true } | { ok: false; error: string };
+
+export type SwitcherCat = {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  role: string;
+};
+
+export type CatSwitcherData = {
+  currentCatId: string;
+  cats: SwitcherCat[];
+};
+
+function toSwitcherCat(membership: {
+  cat: { id: string; name: string; avatarUrl: string | null };
+  role: string;
+}): SwitcherCat {
+  return {
+    id: membership.cat.id,
+    name: membership.cat.name,
+    avatarUrl: membership.cat.avatarUrl,
+    role: membership.role,
+  };
+}
 
 function emptyToNull(value: unknown): unknown {
   if (typeof value === 'string') {
@@ -48,6 +78,13 @@ const updateCatSchema = z
       z
         .string({ error: '绝育日期格式不正确' })
         .refine(isValidDateString, '绝育日期不存在')
+        .nullable(),
+    ),
+    isolationStart: z.preprocess(
+      emptyToNull,
+      z
+        .string({ error: '隔离起始日格式不正确' })
+        .refine(isValidDateString, '隔离起始日不存在')
         .nullable(),
     ),
     note: z.preprocess(
@@ -156,6 +193,9 @@ export async function createCat(
         .run();
     });
 
+    // 新增宠物后直接把它设为当前猫，欢迎页 / 档案页都会跳到 /today。
+    await writeCurrentCatCookie(catId);
+
     revalidatePath('/welcome');
     revalidatePath('/today');
     revalidatePath('/profile');
@@ -168,8 +208,8 @@ export async function createCat(
 }
 
 /**
- * 更新当前用户绑定猫咪的档案。
- * catId 不从客户端读取：始终使用当前用户在 cat_members 中的那条记录。
+ * 更新当前猫的档案。
+ * catId 不从客户端读取：始终使用 requireCurrentCat() 校验后的当前猫。
  */
 export async function updateCat(
   input: Record<string, unknown>,
@@ -182,21 +222,10 @@ export async function updateCat(
     };
   }
 
-  const user = await requireUser();
+  const { cat, role } = await requireCurrentCat();
 
   try {
-    const [membership] = await db
-      .select({ catId: catMembers.catId, role: catMembers.role })
-      .from(catMembers)
-      .where(eq(catMembers.userId, user.id))
-      .orderBy(asc(catMembers.catId))
-      .limit(1);
-
-    if (!membership) {
-      return { ok: false, error: '还没有猫咪档案' };
-    }
-
-    if (membership.role !== 'owner') {
+    if (role !== 'owner') {
       return { ok: false, error: '只有创建者可以修改档案' };
     }
 
@@ -212,7 +241,10 @@ export async function updateCat(
         neuteredAt: data.neutered ? data.neuteredAt : null,
         note: data.note,
       })
-      .where(eq(cats.id, membership.catId));
+      .where(eq(cats.id, cat.id));
+
+    // 隔离起始日不在 cats 表里（避免为一个临时状态改表结构），按 catId 存 app_settings。
+    saveIsolationStart(cat.id, data.isolationStart ?? null);
 
     revalidatePath('/profile');
     revalidatePath('/today');
@@ -222,4 +254,51 @@ export async function updateCat(
     console.error('[updateCat] 保存失败', error);
     return { ok: false, error: '保存失败，请稍后再试' };
   }
+}
+
+const catIdSchema = z.uuid({ error: '猫咪不存在' });
+
+/**
+ * 切换当前猫：先校验 membership，再写 per-browser cookie。
+ * 客户端不要直接传任意 catId 做写操作，这里始终以 membership 为准。
+ */
+export async function setCurrentCat(
+  catId: string,
+): Promise<SetCurrentCatResult> {
+  const parsed = catIdSchema.safeParse(catId);
+  if (!parsed.success) {
+    return { ok: false, error: '猫咪不存在' };
+  }
+
+  const user = await requireUser();
+
+  const [membership] = await db
+    .select({ catId: catMembers.catId })
+    .from(catMembers)
+    .where(
+      and(
+        eq(catMembers.userId, user.id),
+        eq(catMembers.catId, parsed.data),
+      ),
+    )
+    .limit(1);
+
+  if (!membership) {
+    return { ok: false, error: '没有这只猫的访问权限' };
+  }
+
+  await writeCurrentCatCookie(membership.catId);
+  revalidatePath('/today');
+
+  return { ok: true };
+}
+
+/** PC 侧栏在客户端挂载后拉取切换器需要的数据。 */
+export async function getCatSwitcherData(): Promise<CatSwitcherData> {
+  const { cat, memberships } = await requireCurrentCat();
+
+  return {
+    currentCatId: cat.id,
+    cats: memberships.map(toSwitcherCat),
+  };
 }

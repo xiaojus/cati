@@ -1,48 +1,18 @@
-import { asc, desc, eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { Download } from 'lucide-react';
-import CatEmpty from '@/components/CatEmpty';
 import RecordsManager, {
   type RecordListItem,
 } from '@/components/RecordsManager';
-import { requireUser } from '@/lib/auth';
+import { requireCurrentCat } from '@/lib/current-cat';
 import { todayInShanghai } from '@/lib/dates';
 import { db } from '@/lib/db';
-import { catMembers, cats, records } from '@/lib/schema';
+import { records, users } from '@/lib/schema';
 
 export const instant = false;
 
 export default async function RecordsPage() {
-  const user = await requireUser();
+  const { cat } = await requireCurrentCat();
   const today = todayInShanghai();
-
-  const [cat] = await db
-    .select({
-      id: cats.id,
-      name: cats.name,
-    })
-    .from(catMembers)
-    .innerJoin(cats, eq(cats.id, catMembers.catId))
-    .where(eq(catMembers.userId, user.id))
-    .orderBy(asc(catMembers.catId))
-    .limit(1);
-
-  if (!cat) {
-    return (
-      <div className="pb-6">
-        <header className="mb-5">
-          <p className="text-sm text-muted">疫苗 · 驱虫 · 就诊 · 用药</p>
-          <h1 className="mt-1 text-[28px] font-bold tracking-tight">记录</h1>
-        </header>
-
-        <section className="rounded-[20px] bg-white shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
-          <CatEmpty
-            title="还没有猫咪档案"
-            hint="先在档案页建立煤球的基础信息，这里就能记录疫苗和驱虫了。"
-          />
-        </section>
-      </div>
-    );
-  }
 
   const rows = await db
     .select({
@@ -55,12 +25,23 @@ export default async function RecordsPage() {
       cost: records.cost,
       vet: records.vet,
       note: records.note,
+      recorderDisplayName: users.displayName,
+      recorderEmail: users.email,
     })
     .from(records)
+    .leftJoin(users, eq(users.id, records.createdBy))
     .where(eq(records.catId, cat.id))
     .orderBy(desc(records.eventDate), desc(records.createdAt));
 
-  const items: RecordListItem[] = rows;
+  const items: RecordListItem[] = rows.map(
+    ({ recorderDisplayName, recorderEmail, ...record }) => ({
+      ...record,
+      recorderName:
+        recorderDisplayName?.trim() ||
+        recorderEmail?.split('@')[0] ||
+        null,
+    }),
+  );
 
   return (
     <div className="pb-6">

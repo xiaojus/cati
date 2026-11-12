@@ -2,6 +2,7 @@ import { and, asc, eq, gte, lte } from 'drizzle-orm';
 import { Download } from 'lucide-react';
 import Link from 'next/link';
 import CatEmpty from '@/components/CatEmpty';
+import { requireCurrentCat } from '@/lib/current-cat';
 import {
   AppetiteHeatmap,
   StoolChart,
@@ -9,10 +10,9 @@ import {
   WeightChart,
   type DailyChartPoint,
 } from '@/components/DataCharts';
-import { requireUser } from '@/lib/auth';
 import { addDays, lastNDates, todayInShanghai } from '@/lib/dates';
 import { db } from '@/lib/db';
-import { catMembers, cats, dailyLogs } from '@/lib/schema';
+import { dailyLogs } from '@/lib/schema';
 
 export const instant = false;
 
@@ -23,40 +23,11 @@ type DataPageProps = {
 };
 
 export default async function DataPage({ searchParams }: DataPageProps) {
-  const user = await requireUser();
+  const { cat } = await requireCurrentCat();
   const { range: rawRange } = await searchParams;
   const range =
     rawRange === '7' || rawRange === '90' ? Number(rawRange) : 30;
   const today = todayInShanghai();
-
-  const [cat] = await db
-    .select({
-      id: cats.id,
-      name: cats.name,
-    })
-    .from(catMembers)
-    .innerJoin(cats, eq(cats.id, catMembers.catId))
-    .where(eq(catMembers.userId, user.id))
-    .orderBy(asc(catMembers.catId))
-    .limit(1);
-
-  if (!cat) {
-    return (
-      <div className="pb-6">
-        <header className="mb-5">
-          <p className="text-sm text-muted">健康趋势</p>
-          <h1 className="mt-1 text-[28px] font-bold tracking-tight">数据</h1>
-        </header>
-
-        <section className="rounded-[20px] bg-white shadow-[0_2px_12px_rgba(23,21,26,0.06)] dark:bg-white/[0.06]">
-          <CatEmpty
-            title="还没有猫咪档案"
-            hint="先在档案页建立煤球的基础信息，这里就会开始积累趋势。"
-          />
-        </section>
-      </div>
-    );
-  }
 
   // 体重 / 便便 / 呕吐按所选区间展示；食欲热图固定最近 30 天，
   // 所以一次取 max(区间, 30) 天，避免切到 7 天时热图缺数据。

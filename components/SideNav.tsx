@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { BarChart3, Cat, ClipboardList, Home, Palette } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CatPortrait } from '@/components/CatEmpty';
+import CatSwitcher from '@/components/CatSwitcher';
 
 const TABS = [
   { href: '/today', label: '今日', Icon: Home },
@@ -19,17 +19,7 @@ export default function SideNav() {
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-[232px] shrink-0 flex-col border-r border-ink/[0.07] bg-cream/95 px-4 py-6 backdrop-blur-md dark:border-white/10 dark:bg-night/95 lg:flex">
-      <div className="flex items-center gap-3 px-2">
-        <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-gold/35 via-gold/15 to-cream ring-1 ring-ink/5 dark:from-gold/30 dark:via-gold/10 dark:to-white/5 dark:ring-white/10">
-          <CatPortrait className="h-full w-full" />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-ink dark:text-cream">
-            煤球
-          </p>
-          <p className="truncate text-[11px] text-muted">健康记录</p>
-        </div>
-      </div>
+      <CatSwitcher variant="sidebar" />
 
       <nav aria-label="主导航" className="mt-7">
         <ul className="space-y-1">
