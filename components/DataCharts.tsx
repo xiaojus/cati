@@ -88,10 +88,10 @@ export function WeightChart({ points }: { points: DailyChartPoint[] }) {
   const hasData = points.some((point) => point.weightKg !== null);
 
   return (
-    <div className="h-[190px] w-full min-w-0 overflow-hidden">
+    <div className="h-[190px] w-full min-w-0 overflow-hidden md:h-[260px]">
       <ResponsiveContainer
         width="100%"
-        height={190}
+        height="100%"
         minWidth={0}
         initialDimension={{ width: 320, height: 190 }}
       >
@@ -161,10 +161,10 @@ function stoolColor(value: number | null): string {
 
 export function StoolChart({ points }: { points: DailyChartPoint[] }) {
   return (
-    <div className="h-[190px] w-full min-w-0 overflow-hidden">
+    <div className="h-[190px] w-full min-w-0 overflow-hidden md:h-[260px]">
       <ResponsiveContainer
         width="100%"
-        height={190}
+        height="100%"
         minWidth={0}
         initialDimension={{ width: 320, height: 190 }}
       >
@@ -223,10 +223,10 @@ export function VomitChart({ points }: { points: DailyChartPoint[] }) {
   );
 
   return (
-    <div className="h-[190px] w-full min-w-0 overflow-hidden">
+    <div className="h-[190px] w-full min-w-0 overflow-hidden md:h-[260px]">
       <ResponsiveContainer
         width="100%"
-        height={190}
+        height="100%"
         minWidth={0}
         initialDimension={{ width: 320, height: 190 }}
       >
@@ -318,7 +318,7 @@ export function AppetiteHeatmap({ points }: { points: DailyChartPoint[] }) {
   const leadingBlanks = mondayFirstIndex(days[0].date);
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 md:max-w-[420px]">
       <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-muted">
         {WEEKDAY_LABELS.map((label) => (
           <span key={label}>{label}</span>

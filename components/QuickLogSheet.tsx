@@ -532,8 +532,7 @@ export default function QuickLogSheet({ today, catName }: QuickLogSheetProps) {
   return (
     <>
       <div
-        className="pointer-events-none fixed inset-x-0 z-40 mx-auto w-full max-w-[480px] px-5"
-        style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
+        className="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-40 mx-auto w-full max-w-[480px] px-5 md:left-auto md:right-6 md:mx-0 md:w-auto md:max-w-none lg:right-10 lg:bottom-10"
       >
         <div className="flex justify-end">
           <motion.button
